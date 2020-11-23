@@ -2540,6 +2540,68 @@ out:
 	return retval;
 }
 
+/**
+ * mpi3mr_print_ioc_info - Display controller information
+ * @mrioc: Adapter instance reference
+ *
+ * Display controller personalit, capability, supported
+ * protocols etc.
+ *
+ * Return: Nothing
+ */
+static void
+mpi3mr_print_ioc_info(struct mpi3mr_ioc *mrioc)
+{
+	int i = 0;
+	char personality[16];
+	struct mpi3mr_compimg_ver *fwver = &mrioc->facts.fw_ver;
+
+	switch (mrioc->facts.personality) {
+	case MPI3_IOCFACTS_FLAGS_PERSONALITY_EHBA:
+		strcpy(personality, "Enhanced HBA");
+		break;
+	case MPI3_IOCFACTS_FLAGS_PERSONALITY_RAID_DDR:
+		strcpy(personality, "RAID");
+		break;
+	default:
+		strcpy(personality, "Unknown");
+		break;
+	}
+
+	ioc_info(mrioc, "Running in %s Personality", personality);
+
+	ioc_info(mrioc, "FW Version(%d.%d.%d.%d.%d.%d)\n",
+	fwver->gen_major, fwver->gen_minor, fwver->ph_major,
+	    fwver->ph_minor, fwver->cust_id, fwver->build_num);
+
+	ioc_info(mrioc, "Protocol=(");
+
+	if (mrioc->facts.protocol_flags &
+	    MPI3_IOCFACTS_PROTOCOL_SCSI_INITIATOR) {
+		pr_cont("Initiator");
+		i++;
+	}
+
+	if (mrioc->facts.protocol_flags &
+	    MPI3_IOCFACTS_PROTOCOL_SCSI_TARGET) {
+		pr_cont("%sTarget", i ? "," : "");
+		i++;
+	}
+
+	if (mrioc->facts.protocol_flags &
+	    MPI3_IOCFACTS_PROTOCOL_NVME) {
+		pr_cont("%sNVMe attachment", i ? "," : "");
+		i++;
+	}
+	pr_cont("), ");
+	pr_cont("Capabilities=(");
+
+	if (mrioc->facts.ioc_capabilities &
+	    MPI3_IOCFACTS_CAPABILITY_RAID_CAPABLE)
+		pr_cont("RAID");
+
+	pr_cont(")\n");
+}
 
 /**
  * mpi3mr_cleanup_resources - Free PCI resources
@@ -2798,6 +2860,7 @@ int mpi3mr_init_ioc(struct mpi3mr_ioc *mrioc, u8 re_init)
 		}
 
 	}
+	mpi3mr_print_ioc_info(mrioc);
 
 	retval = mpi3mr_alloc_reply_sense_bufs(mrioc);
 	if (retval) {
