@@ -118,6 +118,7 @@ extern struct list_head mrioc_list;
 #define MPI3MR_SENSEBUF_SZ	256
 #define MPI3MR_SENSEBUF_FACTOR	3
 #define MPI3MR_CHAINBUF_FACTOR	3
+#define MPI3MR_CHAINBUFDIX_FACTOR	2
 
 /* Invalid target device handle */
 #define MPI3MR_INVALID_DEV_HANDLE	0xFFFF
@@ -144,6 +145,15 @@ extern struct list_head mrioc_list;
 
 /* Default target device queue depth */
 #define MPI3MR_DEFAULT_SDEV_QD	32
+
+/* Definitions for the sector size for EEDP */
+#define MPI3_SECTOR_SIZE_512_BYTE	(512)
+#define MPI3_SECTOR_SIZE_520_BYTE	(520)
+#define MPI3_SECTOR_SIZE_4080_BYTE	(4080)
+#define MPI3_SECTOR_SIZE_4088_BYTE	(4088)
+#define MPI3_SECTOR_SIZE_4096_BYTE	(4096)
+#define MPI3_SECTOR_SIZE_4104_BYTE	(4104)
+#define MPI3_SECTOR_SIZE_4160_BYTE	(4160)
 
 /* Definitions for Threaded IRQ poll*/
 #define MPI3MR_IRQ_POLL_SLEEP			2
@@ -559,17 +569,21 @@ struct chain_element {
  *
  * @host_tag: Host tag specific to operational queue
  * @in_lld_scope: Command in LLD scope or not
+ * @meta_sg_valid: DIX command with meta data SGL or not
  * @scmd: SCSI Command pointer
- * @req_q_idx: Operational request queue index
+ * @req_q_idx: Operational request queue undex
  * @chain_idx: Chain frame index
+ * @meta_chain_idx: Chain frame index of meta data SGL
  * @mpi3mr_scsiio_req: MPI SCSI IO request
  */
-struct scmd_priv {
+struct scmd_priv{
 	u16 host_tag;
 	u8 in_lld_scope;
+	u8 meta_sg_valid;
 	struct scsi_cmnd *scmd;
 	u16 req_q_idx;
 	int chain_idx;
+	int meta_chain_idx;
 	u8 mpi3mr_scsiio_req[MPI3MR_ADMIN_REQ_FRAME_SZ];
 };
 
