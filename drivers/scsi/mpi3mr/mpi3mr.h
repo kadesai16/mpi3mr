@@ -121,7 +121,7 @@ extern int prot_mask;
 
 /* Definitions for Event replies and sense buffer allocated per controller */
 #define MPI3MR_NUM_EVT_REPLIES	64
-#define MPI3MR_SENSEBUF_SZ	256
+#define MPI3MR_SENSE_BUF_SZ	256
 #define MPI3MR_SENSEBUF_FACTOR	3
 #define MPI3MR_CHAINBUF_FACTOR	3
 #define MPI3MR_CHAINBUFDIX_FACTOR	2
@@ -249,7 +249,7 @@ struct mpi3mr_ioc_facts {
 	u16 max_vds;
 	u16 max_hpds;
 	u16 max_advhpds;
-	u16 max_raidpds;
+	u16 max_raid_pds;
 	u16 min_devhandle;
 	u16 max_devhandle;
 	u16 max_op_req_q;
@@ -524,6 +524,7 @@ struct mpi3mr_sdev_priv_data {
  * @ioc_status: IOC status from the firmware
  * @ioc_loginfo:IOC log info from the firmware
  * @is_waiting: Is the command issued in block mode
+ * @is_sense: Is Sense data present
  * @retry_count: Retry count for retriable commands
  * @host_tag: Host tag used by the command
  * @callback: Callback for non blocking commands
@@ -539,6 +540,7 @@ struct mpi3mr_drv_cmd {
 	u16 ioc_status;
 	u32 ioc_loginfo;
 	u8 is_waiting;
+	bool is_sense;
 	u8 retry_count;
 	u16 host_tag;
 
@@ -665,6 +667,7 @@ struct scmd_priv {
  * @chain_bitmap_sz: Chain buffer allocator bitmap size
  * @chain_bitmap: Chain buffer allocator bitmap
  * @chain_buf_lock: Chain buffer list lock
+ * @ioctl_cmds: Command tracker for IOCTL command
  * @host_tm_cmds: Command tracker for task management commands
  * @dev_rmhs_cmds: Command tracker for device removal commands
  * @devrem_bitmap_sz: Device removal bitmap size
@@ -676,6 +679,7 @@ struct scmd_priv {
  * @fault_dbg: Fault debug flag
  * @reset_in_progress: Reset in progress flag
  * @unrecoverable: Controller unrecoverable flag
+ * @block_ioctls: Block IOCTL flag
  * @reset_mutex: Controller reset mutex
  * @reset_waitq: Controller reset  wait queue
  * @diagsave_timeout: Diagnostic information save timeout
@@ -685,6 +689,9 @@ struct scmd_priv {
  * @driver_info: Driver, Kernel, OS information to firmware
  * @change_count: Topology change count
  * @op_reply_q_offset: Operational reply queue offset with MSIx
+ * @logdata_buf: Circular buffer to store log data entries
+ * @logdata_buf_idx: Index of entry in buffer to store
+ * @logdata_entry_sz: log data entry size
  */
 struct mpi3mr_ioc {
 	struct list_head list;
@@ -789,6 +796,7 @@ struct mpi3mr_ioc {
 	void *chain_bitmap;
 	spinlock_t chain_buf_lock;
 
+	struct mpi3mr_drv_cmd ioctl_cmds;
 	struct mpi3mr_drv_cmd host_tm_cmds;
 	struct mpi3mr_drv_cmd dev_rmhs_cmds[MPI3MR_NUM_DEVRMCMD];
 	u16 devrem_bitmap_sz;
@@ -801,6 +809,7 @@ struct mpi3mr_ioc {
 	u8 fault_dbg;
 	u8 reset_in_progress;
 	u8 unrecoverable;
+	u8 block_ioctls;
 	struct mutex reset_mutex;
 	wait_queue_head_t reset_waitq;
 
@@ -812,6 +821,10 @@ struct mpi3mr_ioc {
 	struct mpi3_driver_info_layout driver_info;
 	u16 change_count;
 	u16 op_reply_q_offset;
+
+	u8 *logdata_buf;
+	u16 logdata_buf_idx;
+	u16 logdata_entry_sz;
 };
 
 /**
@@ -874,6 +887,15 @@ void mpi3mr_repost_sense_buf(struct mpi3mr_ioc *mrioc,
 
 void mpi3mr_os_handle_events(struct mpi3mr_ioc *mrioc,
 			     struct mpi3_event_notification_reply *event_reply);
+struct mpi3mr_tgt_dev *mpi3mr_get_tgtdev_by_handle(
+				struct mpi3mr_ioc *mrioc, u16 handle);
+struct mpi3mr_tgt_dev *mpi3mr_get_tgtdev_by_perst_id(
+				struct mpi3mr_ioc *mrioc, u16 persist_id);
+struct mpi3mr_tgt_dev *mpi3mr_get_tgtdev_by_bustgt_id(
+				struct mpi3mr_ioc *mrioc, u8 bus, u32 tgt_id);
+struct mpi3mr_tgt_dev *mpi3mr_get_tgtdev_from_tgtpriv(
+				struct mpi3mr_ioc *mrioc,
+				struct mpi3mr_stgt_priv_data *tgt_priv);
 void mpi3mr_process_op_reply_desc(struct mpi3mr_ioc *mrioc,
 				  struct mpi3_default_reply_descriptor *reply_desc,
 				  u64 *reply_dma, u16 qidx);
@@ -897,5 +919,8 @@ void mpi3mr_flush_host_io(struct mpi3mr_ioc *mrioc);
 void mpi3mr_invalidate_devhandles(struct mpi3mr_ioc *mrioc);
 void mpi3mr_rfresh_tgtdevs(struct mpi3mr_ioc *mrioc);
 void mpi3mr_flush_delayed_rmhs_list(struct mpi3mr_ioc *mrioc);
+
+void mpi3mr_app_init(void);
+void mpi3mr_app_exit(void);
 
 #endif /*MPI3MR_H_INCLUDED*/
