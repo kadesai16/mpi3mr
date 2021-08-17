@@ -2009,7 +2009,7 @@ static void mpi3mr_watchdog_work(struct work_struct *work)
 			mpi3mr_print_fault_info(mrioc);
 		mrioc->diagsave_timeout = 0;
 
-		if (fault == MPI3_SYSIF_FAULT_CODE_FACTORY_RESET) {
+		if (fault == MPI3_SYSIF_FAULT_CODE_POWER_CYCLE_REQUIRED) {
 			ioc_info(mrioc,
 			    "Factory Reset fault occurred marking controller as unrecoverable"
 			    );
@@ -2374,14 +2374,13 @@ static void mpi3mr_process_factsdata(struct mpi3mr_ioc *mrioc,
 	mrioc->facts.reply_sz = le16_to_cpu(facts_data->reply_frame_size) * 4;
 	mrioc->facts.exceptions = le16_to_cpu(facts_data->ioc_exceptions);
 	mrioc->facts.max_perids = le16_to_cpu(facts_data->max_persistent_id);
-	mrioc->facts.max_pds = le16_to_cpu(facts_data->max_pds);
 	mrioc->facts.max_vds = le16_to_cpu(facts_data->max_vds);
 	mrioc->facts.max_hpds = le16_to_cpu(facts_data->max_host_pds);
-	mrioc->facts.max_advhpds = le16_to_cpu(facts_data->max_advanced_host_pds);
+	mrioc->facts.max_advhpds = le16_to_cpu(facts_data->max_adv_host_pds);
 	mrioc->facts.max_raidpds = le16_to_cpu(facts_data->max_raid_pds);
 	mrioc->facts.max_nvme = le16_to_cpu(facts_data->max_nvme);
 	mrioc->facts.max_pcie_switches =
-	    le16_to_cpu(facts_data->max_pc_ie_switches);
+	    le16_to_cpu(facts_data->max_pcie_switches);
 	mrioc->facts.max_sasexpanders =
 	    le16_to_cpu(facts_data->max_sas_expanders);
 	mrioc->facts.max_sasinitiators =
@@ -3675,7 +3674,7 @@ static void mpi3mr_issue_ioc_shutdown(struct mpi3mr_ioc *mrioc)
 
 	ioc_config = readl(&mrioc->sysif_regs->ioc_configuration);
 	ioc_config |= MPI3_SYSIF_IOC_CONFIG_SHUTDOWN_NORMAL;
-	ioc_config |= MPI3_SYSIF_IOC_CONFIG_DEVICE_SHUTDOWN;
+	ioc_config |= MPI3_SYSIF_IOC_CONFIG_DEVICE_SHUTDOWN_SEND_REQ;
 
 	writel(ioc_config, &mrioc->sysif_regs->ioc_configuration);
 
