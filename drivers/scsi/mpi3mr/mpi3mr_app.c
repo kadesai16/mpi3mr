@@ -195,6 +195,212 @@ static long mpi3mr_get_logdata(struct mpi3mr_ioc *mrioc,
 }
 
 /**
+ * mpi3mr_app_pel_getseq - sends PEL get sequence number request
+ * @mrioc: Adapter instance reference
+ *
+ * This function sends PEL get sequence number request to the
+ * firmware through admin request queue.
+ *
+ * Return: 0 on success, Non-zero on failure
+ */
+static int mpi3mr_app_pel_getseq(struct mpi3mr_ioc *mrioc)
+{
+	struct mpi3_pel_req_action_get_sequence_numbers pel_getseq_req;
+	int retval = 0;
+	u8 sgl_flags = (MPI3_SGE_FLAGS_ELEMENT_TYPE_SIMPLE |
+			MPI3_SGE_FLAGS_DLAS_SYSTEM |
+			MPI3_SGE_FLAGS_END_OF_LIST);
+
+	if (mrioc->reset_in_progress ||
+		mrioc->block_ioctls) {
+		dbgprint(mrioc, "%s: reset %d blocked ioctl %d\n",
+				__func__, mrioc->reset_in_progress,
+				mrioc->block_ioctls);
+		return -1;
+	}
+
+	memset(&pel_getseq_req, 0, sizeof(pel_getseq_req));
+	if (mrioc->pel_cmds.state & MPI3MR_CMD_PENDING) {
+		dbgprint(mrioc, "%s: command is in use\n", __func__);
+		return -1;
+	}
+	mrioc->pel_cmds.state = MPI3MR_CMD_PENDING;
+	mrioc->pel_cmds.is_waiting = 0;
+	mrioc->pel_cmds.retry_count = 0;
+	mrioc->pel_cmds.ioc_status = 0;
+	mrioc->pel_cmds.ioc_loginfo = 0;
+	mrioc->pel_cmds.callback = mpi3mr_pel_getseq_complete;
+	pel_getseq_req.host_tag = cpu_to_le16(MPI3MR_HOSTTAG_PEL_WAIT);
+	pel_getseq_req.function = MPI3_FUNCTION_PERSISTENT_EVENT_LOG;
+	pel_getseq_req.action = MPI3_PEL_ACTION_GET_SEQNUM;
+	mpi3mr_add_sg_single(&pel_getseq_req.sgl, sgl_flags,
+	    mrioc->pel_seqnum_sz, mrioc->pel_seqnum_dma);
+
+	retval = mpi3mr_admin_request_post(mrioc, &pel_getseq_req,
+	    sizeof(pel_getseq_req), 0);
+
+	return retval;
+}
+
+/**
+ * mpi3mr_app_pel_abort - sends PEL abort request
+ * @mrioc: Adapter instance reference
+ *
+ * This function sends PEL abort request to the firmware through
+ * admin request queue.
+ *
+ * Return: 0 on success, Non-zero on failure
+ */
+static int mpi3mr_app_pel_abort(struct mpi3mr_ioc *mrioc)
+{
+	struct mpi3_pel_req_action_abort pel_abort_req;
+	struct mpi3_pel_reply *pel_reply;
+	int retval = 0;
+	u16 pe_log_status;
+
+	if (mrioc->reset_in_progress ||
+		mrioc->block_ioctls) {
+		dbgprint(mrioc, "%s: reset %d blocked ioctl %d\n",
+				__func__, mrioc->reset_in_progress,
+				mrioc->block_ioctls);
+		return -1;
+	}
+
+	memset(&pel_abort_req, 0, sizeof(pel_abort_req));
+	mutex_lock(&mrioc->pel_abort_cmd.mutex);
+	if (mrioc->pel_abort_cmd.state & MPI3MR_CMD_PENDING) {
+		dbgprint(mrioc, "%s: command is in use\n", __func__);
+		mutex_unlock(&mrioc->pel_abort_cmd.mutex);
+		return -1;
+	}
+	mrioc->pel_abort_cmd.state = MPI3MR_CMD_PENDING;
+	mrioc->pel_abort_cmd.is_waiting = 1;
+	mrioc->pel_abort_cmd.callback = NULL;
+	pel_abort_req.host_tag = cpu_to_le16(MPI3MR_HOSTTAG_PEL_ABORT);
+	pel_abort_req.function = MPI3_FUNCTION_PERSISTENT_EVENT_LOG;
+	pel_abort_req.action = MPI3_PEL_ACTION_ABORT;
+	pel_abort_req.abort_host_tag = cpu_to_le16(MPI3MR_HOSTTAG_PEL_WAIT);
+
+	mrioc->pel_abort_requested = true;
+	init_completion(&mrioc->pel_abort_cmd.done);
+	retval = mpi3mr_admin_request_post(mrioc, &pel_abort_req,
+	    sizeof(pel_abort_req), 0);
+	if (retval) {
+		mrioc->pel_abort_requested = false;
+		goto out_unlock;
+	}
+
+	wait_for_completion_timeout(&mrioc->pel_abort_cmd.done,
+	    (MPI3MR_INTADMCMD_TIMEOUT * HZ));
+	if (!(mrioc->pel_abort_cmd.state & MPI3MR_CMD_COMPLETE)) {
+		mrioc->pel_abort_cmd.is_waiting = 0;
+		dbgprint(mrioc, "%s: command timedout\n", __func__);
+		if (!(mrioc->pel_abort_cmd.state & MPI3MR_CMD_RESET))
+			mpi3mr_soft_reset_handler(mrioc,
+			    MPI3MR_RESET_FROM_PELABORT_TIMEOUT, 1);
+		retval = -1;
+		goto out_unlock;
+	}
+	if ((mrioc->pel_abort_cmd.ioc_status & MPI3_IOCSTATUS_STATUS_MASK)
+	     != MPI3_IOCSTATUS_SUCCESS) {
+		dbgprint(mrioc,
+		    "%s: command failed, ioc_status(0x%04x) log_info(0x%08x)\n",
+		    __func__, (mrioc->pel_abort_cmd.ioc_status &
+		    MPI3_IOCSTATUS_STATUS_MASK),
+		    mrioc->pel_abort_cmd.ioc_loginfo);
+		retval = -1;
+		goto out_unlock;
+	}
+	if (mrioc->pel_abort_cmd.state & MPI3MR_CMD_REPLY_VALID) {
+		pel_reply = (struct mpi3_pel_reply *)mrioc->pel_abort_cmd.reply;
+		pe_log_status = le16_to_cpu(pel_reply->pe_log_status);
+		if (pe_log_status != MPI3_PEL_STATUS_SUCCESS) {
+			dbgprint(mrioc,
+			    "%s: command failed, pel_status(0x%04x)\n",
+			    __func__, pe_log_status);
+			retval = -1;
+		}
+	}
+
+out_unlock:
+	mrioc->pel_abort_cmd.state = MPI3MR_CMD_NOTUSED;
+	mutex_unlock(&mrioc->pel_abort_cmd.mutex);
+	return retval;
+}
+
+/**
+ * mpi3mr_app_pel_enable - Handler for PEL enable driver IOCTL
+ * @mrioc: Adapter instance reference
+ * @data_out_buf: User buffer containing PEL enable data
+ * @data_out_sz: length of the user buffer.
+ *
+ * This function is the handler for PEL enable driver IOCTL.
+ * Validates the application given class and locale and if
+ * requires aborts the existing PEL wait request and/or issues
+ * new PEL wait request to the firmware and returns.
+ *
+ * Return: 0 on success and proper error codes on failure.
+ */
+static long mpi3mr_app_pel_enable(struct mpi3mr_ioc *mrioc,
+	void __user *data_out_buf, uint32_t data_out_sz)
+{
+	long rval = 0;
+	struct mpi3mr_ioctl_out_pel_enable pel_enable;
+	bool issue_pel_wait = false;
+	u8 tmp_class;
+	u16 tmp_locale;
+
+	if (copy_from_user(&pel_enable, data_out_buf, sizeof(pel_enable)))
+		return -EFAULT;
+
+	if (pel_enable.pel_class > MPI3_PEL_CLASS_FAULT) {
+		dbgprint(mrioc, "%s: out of range class %d sent\n",
+			__func__, pel_enable.pel_class);
+		rval = -EINVAL;
+		goto out;
+	}
+	if (!mrioc->pel_enabled)
+		issue_pel_wait = true;
+	else {
+		if ((mrioc->pel_class <= pel_enable.pel_class) &&
+		    !((mrioc->pel_locale & pel_enable.pel_locale) ^
+		      pel_enable.pel_locale)) {
+			issue_pel_wait = false;
+		} else {
+			pel_enable.pel_locale |= mrioc->pel_locale;
+
+			if (mrioc->pel_class < pel_enable.pel_class)
+				pel_enable.pel_class = mrioc->pel_class;
+
+			rval = mpi3mr_app_pel_abort(mrioc);
+			if (rval)
+				goto out;
+			else
+				issue_pel_wait = true;
+		}
+	}
+	if (issue_pel_wait) {
+		tmp_class = mrioc->pel_class;
+		tmp_locale = mrioc->pel_locale;
+		mrioc->pel_class = pel_enable.pel_class;
+		mrioc->pel_locale = pel_enable.pel_locale;
+		mrioc->pel_enabled = true;
+		rval = mpi3mr_app_pel_getseq(mrioc);
+		if (rval) {
+			mrioc->pel_class = tmp_class;
+			mrioc->pel_locale = tmp_locale;
+			mrioc->pel_enabled = false;
+			dbgprint(mrioc,
+			    "%s: pel get sequence number failed, status(%ld)\n",
+			    __func__, rval);
+		}
+	}
+
+out:
+	return rval;
+}
+
+/**
  * mpi3mr_get_change_count - Get topology change count
  * @mrioc: Adapter instance reference
  * @data_in_buf: User buffer to copy the change count
@@ -347,6 +553,10 @@ mpi3mr_ioctl_process_drv_cmds(struct file *file, void __user *arg)
 	case MPI3MR_DRVIOCTL_OPCODE_GETLOGDATA:
 		rval = mpi3mr_get_logdata(mrioc, karg.data_in_buf,
 					karg.data_in_size);
+		break;
+	case MPI3MR_DRVIOCTL_OPCODE_PELENABLE:
+		rval = mpi3mr_app_pel_enable(mrioc, karg.data_out_buf,
+		    karg.data_out_size);
 		break;
 	case MPI3MR_DRVIOCTL_OPCODE_GETCHGCNT:
 		rval = mpi3mr_get_change_count(mrioc, karg.data_in_buf,
@@ -798,6 +1008,24 @@ static long mpi3mr_ioctl(struct file *file, unsigned int cmd,
 		break;
 	}
 	return rval;
+}
+
+/**
+ * mpi3mr_app_send_aen - Notify applications about an AEN
+ * @mrioc: Adapter instance reference
+ *
+ * Sends async signal SIGIO to indicate there is an async event
+ * from the firmware to the event monitoring applications.
+ *
+ * Return:Nothing
+ */
+void mpi3mr_app_send_aen(struct mpi3mr_ioc *mrioc)
+{
+	dbgprint(mrioc, "%s: invoked\n", __func__);
+	if (mpi3mr_app_async_queue) {
+		dbgprint(mrioc, "%s: sending signal\n", __func__);
+		kill_fasync(&mpi3mr_app_async_queue, SIGIO, POLL_IN);
+	}
 }
 
 /**
