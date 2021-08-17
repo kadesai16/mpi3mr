@@ -9,7 +9,6 @@
 
 #include "mpi3mr.h"
 #include <linux/io-64-nonatomic-lo-hi.h>
-extern int prot_mask;
 
 #if defined(writeq) && defined(CONFIG_64BIT)
 static inline void mpi3mr_writeq(__u64 b, volatile void __iomem *addr)
@@ -665,8 +664,9 @@ static inline int mpi3mr_request_irq(struct mpi3mr_ioc *mrioc, u16 index)
 static int mpi3mr_setup_isr(struct mpi3mr_ioc *mrioc, u8 setup_one)
 {
 	unsigned int irq_flags = PCI_IRQ_MSIX;
-	u16 max_vectors = 0, i;
-	int retval = 0;
+	int max_vectors;
+	int retval;
+	int i;
 	struct irq_affinity desc = { .pre_vectors =  1};
 
 	mpi3mr_cleanup_isr(mrioc);
@@ -687,29 +687,29 @@ static int mpi3mr_setup_isr(struct mpi3mr_ioc *mrioc, u8 setup_one)
 	irq_flags |= PCI_IRQ_AFFINITY | PCI_IRQ_ALL_TYPES;
 
 	mrioc->op_reply_q_offset = (max_vectors > 1) ? 1 : 0;
-	i = pci_alloc_irq_vectors_affinity(mrioc->pdev,
-	    1, max_vectors, irq_flags, &desc);
-	if (i <= 0) {
+	retval = pci_alloc_irq_vectors_affinity(mrioc->pdev,
+				1, max_vectors, irq_flags, &desc);
+	if (retval < 0) {
 		ioc_err(mrioc, "Cannot alloc irq vectors\n");
 		goto out_failed;
 	}
-	if (i != max_vectors) {
+	if (retval != max_vectors) {
 		ioc_info(mrioc,
 		    "allocated vectors (%d) are less than configured (%d)\n",
-		    i, max_vectors);
+		    retval, max_vectors);
 		/*
 		 * If only one MSI-x is allocated, then MSI-x 0 will be shared
 		 * between Admin queue and operational queue
 		 */
-		if (i == 1)
+		if (retval == 1)
 			mrioc->op_reply_q_offset = 0;
 
-		max_vectors = i;
+		max_vectors = retval;
 	}
 	mrioc->intr_info = kzalloc(sizeof(struct mpi3mr_intr_info) * max_vectors,
 	    GFP_KERNEL);
 	if (!mrioc->intr_info) {
-		retval = -1;
+		retval = -ENOMEM;
 		pci_free_irq_vectors(mrioc->pdev);
 		goto out_failed;
 	}
@@ -722,7 +722,8 @@ static int mpi3mr_setup_isr(struct mpi3mr_ioc *mrioc, u8 setup_one)
 	}
 	mrioc->intr_info_count = max_vectors;
 	mpi3mr_ioc_enable_intr(mrioc);
-	return retval;
+	return 0;
+
 out_failed:
 	mpi3mr_cleanup_isr(mrioc);
 
@@ -1583,7 +1584,7 @@ static int mpi3mr_create_op_reply_q(struct mpi3mr_ioc *mrioc, u16 qidx)
 	if (mrioc->init_cmds.state & MPI3MR_CMD_PENDING) {
 		retval = -1;
 		ioc_err(mrioc, "CreateRepQ: Init command is in use\n");
-		goto out;
+		goto out_unlock;
 	}
 	mrioc->init_cmds.state = MPI3MR_CMD_PENDING;
 	mrioc->init_cmds.is_waiting = 1;
@@ -1692,7 +1693,7 @@ static int mpi3mr_create_op_req_q(struct mpi3mr_ioc *mrioc, u16 idx,
 	if (mrioc->init_cmds.state & MPI3MR_CMD_PENDING) {
 		retval = -1;
 		ioc_err(mrioc, "CreateReqQ: Init command is in use\n");
-		goto out;
+		goto out_unlock;
 	}
 	mrioc->init_cmds.state = MPI3MR_CMD_PENDING;
 	mrioc->init_cmds.is_waiting = 1;
@@ -3295,6 +3296,7 @@ int mpi3mr_init_ioc(struct mpi3mr_ioc *mrioc, u8 re_init)
 	}
 	ioc_state = mpi3mr_get_iocstate(mrioc);
 	if (ioc_state != MRIOC_STATE_RESET) {
+		retval = -1;
 		ioc_err(mrioc, "Cannot bring IOC to reset state\n");
 		goto out_failed;
 	}
@@ -3391,6 +3393,7 @@ int mpi3mr_init_ioc(struct mpi3mr_ioc *mrioc, u8 re_init)
 
 	if (re_init &&
 	    (mrioc->shost->nr_hw_queues > mrioc->num_op_reply_q)) {
+		retval = -1;
 		ioc_err(mrioc,
 		    "Cannot create minimum number of OpQueues expected:%d created:%d\n",
 		    mrioc->shost->nr_hw_queues, mrioc->num_op_reply_q);
@@ -3583,8 +3586,7 @@ static void mpi3mr_free_mem(struct mpi3mr_ioc *mrioc)
 
 	for (i = 0; i < mrioc->intr_info_count; i++) {
 		intr_info = mrioc->intr_info + i;
-		if (intr_info)
-			intr_info->op_reply_q = NULL;
+		intr_info->op_reply_q = NULL;
 	}
 
 	kfree(mrioc->req_qinfo);
