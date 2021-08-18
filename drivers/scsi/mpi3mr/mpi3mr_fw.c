@@ -3437,7 +3437,6 @@ int mpi3mr_init_ioc(struct mpi3mr_ioc *mrioc, u8 re_init)
 		    GFP_KERNEL);
 		if (!mrioc->pel_seqnum)
 			goto out_failed;
-		memset(mrioc->pel_seqnum, 0, mrioc->pel_seqnum_sz);
 	}
 
 
@@ -4250,6 +4249,11 @@ int mpi3mr_soft_reset_handler(struct mpi3mr_ioc *mrioc,
 out:
 	if (!retval) {
 		mrioc->reset_in_progress = 0;
+		mrioc->pel_abort_requested = 0;
+		if (mrioc->pel_enabled) {
+			mrioc->pel_cmds.retry_count = 0;
+			mpi3mr_send_pel_getseq(mrioc, &mrioc->pel_cmds);
+		}
 		scsi_unblock_requests(mrioc->shost);
 		mpi3mr_rfresh_tgtdevs(mrioc);
 		mrioc->ts_update_counter = 0;
