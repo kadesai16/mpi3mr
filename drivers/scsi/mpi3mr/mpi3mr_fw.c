@@ -3906,7 +3906,7 @@ int mpi3mr_diagfault_reset_handler(struct mpi3mr_ioc *mrioc,
 }
 
 /**
- * mpi3mr_send_pel_wait - Issue PEL Wait
+ * mpi3mr_pel_wait_post - Issue PEL Wait
  * @mrioc: Adapter instance reference
  * @drv_cmd: Internal command tracker
  *
@@ -3914,7 +3914,7 @@ int mpi3mr_diagfault_reset_handler(struct mpi3mr_ioc *mrioc,
  *
  * Return: Nothing.
  */
-static void mpi3mr_send_pel_wait(struct mpi3mr_ioc *mrioc,
+static void mpi3mr_pel_wait_post(struct mpi3mr_ioc *mrioc,
 	struct mpi3mr_drv_cmd *drv_cmd)
 {
 	struct mpi3_pel_req_action_wait pel_wait;
@@ -4055,7 +4055,7 @@ static void mpi3mr_pel_wait_complete(struct mpi3mr_ioc *mrioc,
 			drv_cmd->retry_count++;
 			ioc_info(mrioc, "%s: retry=%d\n",
 			    __func__,  drv_cmd->retry_count);
-			mpi3mr_send_pel_wait(mrioc, drv_cmd);
+			mpi3mr_pel_wait_post(mrioc, drv_cmd);
 			return;
 		}
 		ioc_err(mrioc, "%s: failed after all retries\n", __func__);
@@ -4135,7 +4135,7 @@ void mpi3mr_pel_get_seqnum_complete(struct mpi3mr_ioc *mrioc,
 	}
 	mrioc->newest_seqnum = le32_to_cpu(pel_seqnum->newest) + 1;
 	drv_cmd->retry_count = 0;
-	mpi3mr_send_pel_wait(mrioc, drv_cmd);
+	mpi3mr_pel_wait_post(mrioc, drv_cmd);
 
 	return;
 

@@ -298,7 +298,6 @@ static long mpi3mr_app_pel_enable(struct mpi3mr_ioc *mrioc,
 {
 	long rval = 0;
 	struct mpi3mr_ioctl_out_pel_enable pel_enable;
-	bool issue_pel_wait = false;
 	u8 tmp_class;
 	u16 tmp_locale;
 
@@ -308,47 +307,41 @@ static long mpi3mr_app_pel_enable(struct mpi3mr_ioc *mrioc,
 	if (pel_enable.pel_class > MPI3_PEL_CLASS_FAULT) {
 		dbgprint(mrioc, "%s: out of range class %d sent\n",
 			__func__, pel_enable.pel_class);
-		rval = -EINVAL;
-		goto out;
+		return -EINVAL;
 	}
-	if (!mrioc->pel_enabled)
-		issue_pel_wait = true;
-	else {
+
+	if (mrioc->pel_enabled) {
 		if ((mrioc->pel_class <= pel_enable.pel_class) &&
 		    !((mrioc->pel_locale & pel_enable.pel_locale) ^
-		      pel_enable.pel_locale)) {
-			issue_pel_wait = false;
-		} else {
+		      pel_enable.pel_locale))
+			return 0;
+		else {
 			pel_enable.pel_locale |= mrioc->pel_locale;
-
 			if (mrioc->pel_class < pel_enable.pel_class)
 				pel_enable.pel_class = mrioc->pel_class;
 
 			rval = mpi3mr_app_pel_abort(mrioc);
+
 			if (rval)
-				goto out;
-			else
-				issue_pel_wait = true;
-		}
-	}
-	if (issue_pel_wait) {
-		tmp_class = mrioc->pel_class;
-		tmp_locale = mrioc->pel_locale;
-		mrioc->pel_class = pel_enable.pel_class;
-		mrioc->pel_locale = pel_enable.pel_locale;
-		mrioc->pel_enabled = true;
-		rval = mpi3mr_pel_get_seqnum_post(mrioc, NULL);
-		if (rval) {
-			mrioc->pel_class = tmp_class;
-			mrioc->pel_locale = tmp_locale;
-			mrioc->pel_enabled = false;
-			dbgprint(mrioc,
-			    "%s: pel get sequence number failed, status(%ld)\n",
-			    __func__, rval);
+				return rval;
 		}
 	}
 
-out:
+	tmp_class = mrioc->pel_class;
+	tmp_locale = mrioc->pel_locale;
+	mrioc->pel_class = pel_enable.pel_class;
+	mrioc->pel_locale = pel_enable.pel_locale;
+	mrioc->pel_enabled = true;
+	rval = mpi3mr_pel_get_seqnum_post(mrioc, NULL);
+	if (rval) {
+		mrioc->pel_class = tmp_class;
+		mrioc->pel_locale = tmp_locale;
+		mrioc->pel_enabled = false;
+		dbgprint(mrioc,
+		    "%s: pel get sequence number failed, status(%ld)\n",
+		    __func__, rval);
+	}
+
 	return rval;
 }
 
