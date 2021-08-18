@@ -908,7 +908,7 @@ void *mpi3mr_get_reply_virt_addr(struct mpi3mr_ioc *mrioc,
 				     dma_addr_t phys_addr);
 void mpi3mr_repost_sense_buf(struct mpi3mr_ioc *mrioc,
 				     u64 sense_buf_dma);
-void mpi3mr_pel_getseq_complete(struct mpi3mr_ioc *mrioc,
+void mpi3mr_pel_get_seqnum_complete(struct mpi3mr_ioc *mrioc,
 	struct mpi3mr_drv_cmd *drv_cmd);
 
 void mpi3mr_os_handle_events(struct mpi3mr_ioc *mrioc,
@@ -938,6 +938,8 @@ void mpi3mr_ioc_enable_intr(struct mpi3mr_ioc *mrioc);
 enum mpi3mr_iocstate mpi3mr_get_iocstate(struct mpi3mr_ioc *mrioc);
 int mpi3mr_send_event_ack(struct mpi3mr_ioc *mrioc, u8 event,
 			  u32 event_ctx);
+int mpi3mr_pel_get_seqnum_post(struct mpi3mr_ioc *mrioc,
+	struct mpi3mr_drv_cmd *drv_cmd);
 
 void mpi3mr_wait_for_host_io(struct mpi3mr_ioc *mrioc, u32 timeout);
 void mpi3mr_cleanup_fwevt_list(struct mpi3mr_ioc *mrioc);

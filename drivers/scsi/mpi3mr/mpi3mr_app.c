@@ -195,54 +195,6 @@ static long mpi3mr_get_logdata(struct mpi3mr_ioc *mrioc,
 }
 
 /**
- * mpi3mr_app_pel_getseq - sends PEL get sequence number request
- * @mrioc: Adapter instance reference
- *
- * This function sends PEL get sequence number request to the
- * firmware through admin request queue.
- *
- * Return: 0 on success, Non-zero on failure
- */
-static int mpi3mr_app_pel_getseq(struct mpi3mr_ioc *mrioc)
-{
-	struct mpi3_pel_req_action_get_sequence_numbers pel_getseq_req;
-	int retval = 0;
-	u8 sgl_flags = (MPI3_SGE_FLAGS_ELEMENT_TYPE_SIMPLE |
-			MPI3_SGE_FLAGS_DLAS_SYSTEM |
-			MPI3_SGE_FLAGS_END_OF_LIST);
-
-	if (mrioc->reset_in_progress ||
-		mrioc->block_ioctls) {
-		dbgprint(mrioc, "%s: reset %d blocked ioctl %d\n",
-				__func__, mrioc->reset_in_progress,
-				mrioc->block_ioctls);
-		return -1;
-	}
-
-	memset(&pel_getseq_req, 0, sizeof(pel_getseq_req));
-	if (mrioc->pel_cmds.state & MPI3MR_CMD_PENDING) {
-		dbgprint(mrioc, "%s: command is in use\n", __func__);
-		return -1;
-	}
-	mrioc->pel_cmds.state = MPI3MR_CMD_PENDING;
-	mrioc->pel_cmds.is_waiting = 0;
-	mrioc->pel_cmds.retry_count = 0;
-	mrioc->pel_cmds.ioc_status = 0;
-	mrioc->pel_cmds.ioc_loginfo = 0;
-	mrioc->pel_cmds.callback = mpi3mr_pel_getseq_complete;
-	pel_getseq_req.host_tag = cpu_to_le16(MPI3MR_HOSTTAG_PEL_WAIT);
-	pel_getseq_req.function = MPI3_FUNCTION_PERSISTENT_EVENT_LOG;
-	pel_getseq_req.action = MPI3_PEL_ACTION_GET_SEQNUM;
-	mpi3mr_add_sg_single(&pel_getseq_req.sgl, sgl_flags,
-	    mrioc->pel_seqnum_sz, mrioc->pel_seqnum_dma);
-
-	retval = mpi3mr_admin_request_post(mrioc, &pel_getseq_req,
-	    sizeof(pel_getseq_req), 0);
-
-	return retval;
-}
-
-/**
  * mpi3mr_app_pel_abort - sends PEL abort request
  * @mrioc: Adapter instance reference
  *
@@ -385,7 +337,7 @@ static long mpi3mr_app_pel_enable(struct mpi3mr_ioc *mrioc,
 		mrioc->pel_class = pel_enable.pel_class;
 		mrioc->pel_locale = pel_enable.pel_locale;
 		mrioc->pel_enabled = true;
-		rval = mpi3mr_app_pel_getseq(mrioc);
+		rval = mpi3mr_pel_get_seqnum_post(mrioc, NULL);
 		if (rval) {
 			mrioc->pel_class = tmp_class;
 			mrioc->pel_locale = tmp_locale;
