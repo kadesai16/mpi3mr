@@ -45,6 +45,7 @@
 #include "mpi/mpi30_init.h"
 #include "mpi/mpi30_ioc.h"
 #include "mpi/mpi30_sas.h"
+#include "mpi/mpi30_pci.h"
 #include "mpi3mr_debug.h"
 
 /* Global list and lock for storing multiple adapters managed by the driver */
@@ -685,6 +686,9 @@ struct scmd_priv {
  * @block_ioctls: Block IOCTL flag
  * @reset_mutex: Controller reset mutex
  * @reset_waitq: Controller reset  wait queue
+ * @nvme_encap_prp_list: NVMe encapsulated PRP list virtual base
+ * @nvme_encap_prp_list_dma: NVMe encapsulated PRP list DMA
+ * @nvme_encap_prp_sz: NVME encapsulated PRP list size
  * @diagsave_timeout: Diagnostic information save timeout
  * @logging_level: Controller debug logging level
  * @flush_io_count: I/O count to flush after reset
@@ -825,6 +829,10 @@ struct mpi3mr_ioc {
 	u8 block_ioctls;
 	struct mutex reset_mutex;
 	wait_queue_head_t reset_waitq;
+
+	void *nvme_encap_prp_list;
+	dma_addr_t nvme_encap_prp_list_dma;
+	u32 nvme_encap_prp_sz;
 
 	u16 diagsave_timeout;
 	int logging_level;
