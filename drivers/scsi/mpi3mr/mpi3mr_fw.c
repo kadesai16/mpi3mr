@@ -3918,7 +3918,7 @@ static void mpi3mr_pel_wait_post(struct mpi3mr_ioc *mrioc,
 	struct mpi3mr_drv_cmd *drv_cmd)
 {
 	struct mpi3_pel_req_action_wait pel_wait;
-	u8 retry_count = 0;
+	u8 admin_retries = 0;
 
 	mrioc->pel_abort_requested = false;
 
@@ -3939,8 +3939,8 @@ static void mpi3mr_pel_wait_post(struct mpi3mr_ioc *mrioc,
 	    mrioc->newest_seqnum, mrioc->pel_class, mrioc->pel_locale);
 retry_pel_wait:
 	if (mpi3mr_admin_request_post(mrioc, &pel_wait, sizeof(pel_wait), 0)) {
-		if (retry_count < MPI3MR_PEL_RETRY_COUNT) {
-			retry_count++;
+		if (admin_retries < MPI3MR_PEL_RETRY_COUNT) {
+			admin_retries++;
 			goto retry_pel_wait;
 		}
 		goto out_failed;
@@ -3969,7 +3969,7 @@ int mpi3mr_pel_get_seqnum_post(struct mpi3mr_ioc *mrioc,
 {
 	struct mpi3_pel_req_action_get_sequence_numbers pel_getseq_req;
 	u8 sgl_flags = MPI3MR_SGEFLAGS_SYSTEM_SIMPLE_END_OF_LIST;
-	u8 retry_count = 0;
+	u8 admin_retries = 0;
 	int retval = 0;
 
 	memset(&pel_getseq_req, 0, sizeof(pel_getseq_req));
@@ -3988,8 +3988,8 @@ retry_pel_get_seq:
 	retval = mpi3mr_admin_request_post(mrioc, &pel_getseq_req,
 			sizeof(pel_getseq_req), 0);
 	if (retval) {
-		if (retry_count < MPI3MR_PEL_RETRY_COUNT) {
-			retry_count++;
+		if (admin_retries < MPI3MR_PEL_RETRY_COUNT) {
+			admin_retries++;
 			goto retry_pel_get_seq;
 		} else {
 			if (drv_cmd) {
