@@ -3937,21 +3937,19 @@ static void mpi3mr_pel_wait_post(struct mpi3mr_ioc *mrioc,
 	pel_wait.wait_time = MPI3_PEL_WAITTIME_INFINITE_WAIT;
 	ioc_info(mrioc, "Issuing PELWait: seqnum %d class %d locale 0x%08x\n",
 	    mrioc->newest_seqnum, mrioc->pel_class, mrioc->pel_locale);
+
 retry_pel_wait:
 	if (mpi3mr_admin_request_post(mrioc, &pel_wait, sizeof(pel_wait), 0)) {
 		if (admin_retries < MPI3MR_PEL_RETRY_COUNT) {
 			admin_retries++;
 			goto retry_pel_wait;
+		} else {
+			drv_cmd->state = MPI3MR_CMD_NOTUSED;
+			drv_cmd->callback = NULL;
+			drv_cmd->retry_count = 0;
+			mrioc->pel_enabled = false;
 		}
-		goto out_failed;
 	}
-
-	return;
-out_failed:
-	drv_cmd->state = MPI3MR_CMD_NOTUSED;
-	drv_cmd->callback = NULL;
-	drv_cmd->retry_count = 0;
-	mrioc->pel_enabled = false;
 }
 
 /**
