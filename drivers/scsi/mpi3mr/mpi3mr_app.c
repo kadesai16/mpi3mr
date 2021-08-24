@@ -622,14 +622,10 @@ static int mpi3mr_build_nvme_sgl(struct mpi3mr_ioc *mrioc,
 	struct mpi3mr_buf_map *dma_buffers, u8 bufcnt)
 {
 	struct mpi3mr_nvme_pt_sge *nvme_sgl;
-	u64 sgl_ptr;
+	u64 sgl_ptr, sgemod_mask, sgemod_val;
 	u8 count;
 	size_t length = 0;
 	struct mpi3mr_buf_map *dma_buff = dma_buffers;
-	u64 sgemod_mask = ((u64)((mrioc->facts.sge_mod_mask) <<
-			    mrioc->facts.sge_mod_shift) << 32);
-	u64 sgemod_val = ((u64)(mrioc->facts.sge_mod_value) <<
-			  mrioc->facts.sge_mod_shift) << 32;
 
 	/*
 	 * Not all commands require a data transfer. If no data, just return
@@ -646,6 +642,11 @@ static int mpi3mr_build_nvme_sgl(struct mpi3mr_ioc *mrioc,
 	if (!length)
 		return 0;
 
+	sgemod_mask = ((u64)((mrioc->facts.sge_mod_mask) <<
+				mrioc->facts.sge_mod_shift) << 32);
+	sgemod_val = ((u64)(mrioc->facts.sge_mod_value) <<
+				mrioc->facts.sge_mod_shift) << 32;
+
 	if (sgl_ptr & sgemod_mask) {
 		dbgprint(mrioc,
 		    "%s: SGL address collides with SGE modifier\n",
@@ -660,6 +661,7 @@ static int mpi3mr_build_nvme_sgl(struct mpi3mr_ioc *mrioc,
 	memset(nvme_sgl, 0, sizeof(struct mpi3mr_nvme_pt_sge));
 	nvme_sgl->base_addr = sgl_ptr;
 	nvme_sgl->length = length;
+
 	return 0;
 }
 
@@ -682,20 +684,33 @@ static int mpi3mr_build_nvme_prp(struct mpi3mr_ioc *mrioc,
     struct mpi3mr_buf_map *dma_buffers, u8 bufcnt)
 {
 	int prp_size = MPI3MR_NVME_PRP_SIZE;
-	__le64 *prp_entry, *prp1_entry, *prp2_entry;
-	__le64 *prp_page;
+	__le64 *prp_entry, *prp1_entry, *prp2_entry, *prp_page;
 	dma_addr_t prp_entry_dma, prp_page_dma, dma_addr;
-	u32 offset, entry_len, dev_pgsz;
-	u32 page_mask_result, page_mask;
+	u32 offset, entry_len, dev_pgsz, page_mask_result, page_mask;
 	size_t length = 0;
 	u8 count;
-	struct mpi3mr_buf_map *dma_buff = dma_buffers;
-	u64 sgemod_mask = ((u64)((mrioc->facts.sge_mod_mask) <<
-			    mrioc->facts.sge_mod_shift) << 32);
-	u64 sgemod_val = ((u64)(mrioc->facts.sge_mod_value) <<
-			  mrioc->facts.sge_mod_shift) << 32;
-	u16 dev_handle = nvme_encap_request->dev_handle;
+	struct mpi3mr_buf_map *dma_buff;
 	struct mpi3mr_tgt_dev *tgtdev;
+	u64 sgemod_mask, sgemod_val;
+	u16 dev_handle;
+
+	dma_buff = dma_buffers;
+	dev_handle = nvme_encap_request->dev_handle;
+
+	/*
+	 * Not all commands require a data transfer. If no data, just return
+	 * without constructing any PRP.
+	 */
+	for (count = 0; count < bufcnt; count++, dma_buff++) {
+		if ((dma_buff->data_dir == DMA_TO_DEVICE) ||
+		    (dma_buff->data_dir == DMA_FROM_DEVICE)) {
+			dma_addr = dma_buff->kern_buf_dma;
+			length = dma_buff->kern_buf_len;
+			break;
+		}
+	}
+	if (!length)
+		return 0;
 
 	tgtdev = mpi3mr_get_tgtdev_by_handle(mrioc, dev_handle);
 	if (!tgtdev) {
@@ -713,38 +728,25 @@ static int mpi3mr_build_nvme_prp(struct mpi3mr_ioc *mrioc,
 	dev_pgsz = 1 << (tgtdev->dev_spec.pcie_inf.pgsz);
 	mpi3mr_tgtdev_put(tgtdev);
 
-	/*
-	 * Not all commands require a data transfer. If no data, just return
-	 * without constructing any PRP.
-	 */
-	for (count = 0; count < bufcnt; count++, dma_buff++) {
-		if ((dma_buff->data_dir == DMA_TO_DEVICE) ||
-		    (dma_buff->data_dir == DMA_FROM_DEVICE)) {
-			dma_addr = dma_buff->kern_buf_dma;
-			length = dma_buff->kern_buf_len;
-			break;
-		}
-	}
-	if (!length)
-		return 0;
-
 	mrioc->nvme_encap_prp_sz = 0;
 	mrioc->nvme_encap_prp_list = dma_alloc_coherent(&mrioc->pdev->dev,
-	    dev_pgsz, &mrioc->nvme_encap_prp_list_dma, GFP_KERNEL);
+					dev_pgsz,
+					&mrioc->nvme_encap_prp_list_dma,
+					GFP_KERNEL);
 
 	if (!mrioc->nvme_encap_prp_list)
 		return -1;
-	mrioc->nvme_encap_prp_sz = dev_pgsz;
 
+	mrioc->nvme_encap_prp_sz = dev_pgsz;
 	/*
 	 * Set pointers to PRP1 and PRP2, which are in the NVMe command.
 	 * PRP1 is located at a 24 byte offset from the start of the NVMe
 	 * command.  Then set the current PRP entry pointer to PRP1.
 	 */
 	prp1_entry = (__le64 *)((u8 *)(nvme_encap_request->command) +
-	    MPI3MR_NVME_CMD_PRP1_OFFSET);
+						MPI3MR_NVME_CMD_PRP1_OFFSET);
 	prp2_entry = (__le64 *)((u8 *)(nvme_encap_request->command) +
-	    MPI3MR_NVME_CMD_PRP2_OFFSET);
+						MPI3MR_NVME_CMD_PRP2_OFFSET);
 	prp_entry = prp1_entry;
 	/*
 	 * For the PRP entries, use the specially allocated buffer of
@@ -769,7 +771,10 @@ static int mpi3mr_build_nvme_prp(struct mpi3mr_ioc *mrioc,
 	 * DMA memory page.
 	 */
 	prp_entry_dma = prp_page_dma;
-
+	sgemod_mask = ((u64)((mrioc->facts.sge_mod_mask) <<
+				mrioc->facts.sge_mod_shift) << 32);
+	sgemod_val = ((u64)(mrioc->facts.sge_mod_value) <<
+				mrioc->facts.sge_mod_shift) << 32;
 
 	/* Loop while the length is not zero. */
 	while (length) {
