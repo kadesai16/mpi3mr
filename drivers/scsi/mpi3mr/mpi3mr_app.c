@@ -1227,10 +1227,8 @@ static long mpi3mr_ioctl_process_mpt_cmds(struct file *file,
 			tmplen = min(dma_buff->kern_buf_len,
 					dma_buff->user_buf_len);
 			if (copy_to_user(dma_buff->user_buf,
-					dma_buff->kern_buf, tmplen)) {
+					dma_buff->kern_buf, tmplen))
 				rval = -EFAULT;
-				goto out;
-			}
 		}
 	}
 
