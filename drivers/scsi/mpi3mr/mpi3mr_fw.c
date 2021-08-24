@@ -3918,7 +3918,6 @@ static void mpi3mr_pel_wait_post(struct mpi3mr_ioc *mrioc,
 	struct mpi3mr_drv_cmd *drv_cmd)
 {
 	struct mpi3_pel_req_action_wait pel_wait;
-	u8 admin_retries = 0;
 
 	mrioc->pel_abort_requested = false;
 
@@ -3938,18 +3937,12 @@ static void mpi3mr_pel_wait_post(struct mpi3mr_ioc *mrioc,
 	ioc_info(mrioc, "Issuing PELWait: seqnum %d class %d locale 0x%08x\n",
 	    mrioc->newest_seqnum, mrioc->pel_class, mrioc->pel_locale);
 
-retry_pel_wait:
-	if (mpi3mr_admin_request_post(mrioc, &pel_wait, sizeof(pel_wait), 0)) {
-		if (admin_retries < MPI3MR_PEL_RETRY_COUNT) {
-			admin_retries++;
-			goto retry_pel_wait;
-		} else {
-			drv_cmd->state = MPI3MR_CMD_NOTUSED;
-			drv_cmd->callback = NULL;
-			drv_cmd->retry_count = 0;
-			mrioc->pel_enabled = false;
-		}
-	}
+	mpi3mr_admin_request_post(mrioc, &pel_wait, sizeof(pel_wait), 0);
+
+	drv_cmd->state = MPI3MR_CMD_NOTUSED;
+	drv_cmd->callback = NULL;
+	drv_cmd->retry_count = 0;
+	mrioc->pel_enabled = false;
 }
 
 /**
@@ -3967,7 +3960,6 @@ int mpi3mr_pel_get_seqnum_post(struct mpi3mr_ioc *mrioc,
 {
 	struct mpi3_pel_req_action_get_sequence_numbers pel_getseq_req;
 	u8 sgl_flags = MPI3MR_SGEFLAGS_SYSTEM_SIMPLE_END_OF_LIST;
-	u8 admin_retries = 0;
 	int retval = 0;
 
 	memset(&pel_getseq_req, 0, sizeof(pel_getseq_req));
@@ -3982,21 +3974,15 @@ int mpi3mr_pel_get_seqnum_post(struct mpi3mr_ioc *mrioc,
 	mpi3mr_add_sg_single(&pel_getseq_req.sgl, sgl_flags,
 	    mrioc->pel_seqnum_sz, mrioc->pel_seqnum_dma);
 
-retry_pel_get_seq:
 	retval = mpi3mr_admin_request_post(mrioc, &pel_getseq_req,
 			sizeof(pel_getseq_req), 0);
 	if (retval) {
-		if (admin_retries < MPI3MR_PEL_RETRY_COUNT) {
-			admin_retries++;
-			goto retry_pel_get_seq;
-		} else {
-			if (drv_cmd) {
-				drv_cmd->state = MPI3MR_CMD_NOTUSED;
-				drv_cmd->callback = NULL;
-				drv_cmd->retry_count = 0;
-			}
-			mrioc->pel_enabled = false;
+		if (drv_cmd) {
+			drv_cmd->state = MPI3MR_CMD_NOTUSED;
+			drv_cmd->callback = NULL;
+			drv_cmd->retry_count = 0;
 		}
+		mrioc->pel_enabled = false;
 	}
 
 	return retval;
