@@ -111,6 +111,33 @@ struct mpi3mr_adp_info {
 	struct mpi3_driver_info_layout driver_info;
 };
 
+/* Encapsulated NVMe command definitions */
+#define	MPI3MR_NVME_PRP_SIZE		8 /* PRP size */
+#define	MPI3MR_NVME_CMD_PRP1_OFFSET	24 /* PRP1 offset in NVMe cmd */
+#define	MPI3MR_NVME_CMD_PRP2_OFFSET	32 /* PRP2 offset in NVMe cmd */
+#define	MPI3MR_NVME_CMD_SGL_OFFSET	24 /* SGL offset in NVMe cmd */
+#define MPI3MR_NVME_DATA_FORMAT_PRP	0
+#define MPI3MR_NVME_DATA_FORMAT_SGL1	1
+#define MPI3MR_NVME_DATA_FORMAT_SGL2	2
+
+/**
+ * struct mpi3mr_nvme_pt_sge -  Structure to store SGEs for NVMe
+ * Encapsulated commands.
+ *
+ * @base_addr: Physical address
+ * @length: SGE length
+ * @rsvd: Reserved
+ * @rsvd1: Reserved
+ * @sgl_type: sgl type
+ */
+struct mpi3mr_nvme_pt_sge {
+	u64 base_addr;
+	u32 length;
+	u16 rsvd;
+	u8 rsvd1;
+	u8 sgl_type;
+};
+
 /**
  * struct mpi3mr_buf_map -  local structure to
  * track kernel and user buffers associated with an IOCTL
