@@ -374,8 +374,8 @@ static long mpi3mr_get_change_count(struct mpi3mr_ioc *mrioc,
  * @data_out_sz: length of the user buffer.
  *
  * This function identifies the user provided reset type and
- * issues approporiate reset to the controller, wait for that
- * to complete, reinitialize the controller and then returns
+ * issues approporiate reset to the controller and.wait for that
+ * to complete and reinitialize the controller and then returns
  *
  * Return: 0 on success and proper error codes on failure
  */
@@ -384,27 +384,31 @@ static long mpi3mr_ioctl_adp_reset(struct mpi3mr_ioc *mrioc,
 {
 	long rval = 0;
 	struct mpi3mr_ioctl_adp_reset adpreset;
+	u8 save_snapdump;
 
 	if (copy_from_user(&adpreset, data_out_buf, sizeof(adpreset)))
 		return -EFAULT;
 
 	switch (adpreset.reset_type) {
 	case MPI3MR_IOCTL_ADPRESET_SOFT:
-		rval = mpi3mr_soft_reset_handler(mrioc,
-				MPI3MR_RESET_FROM_IOCTL, 0);
-		dbgprint(mrioc, "reset_type (0x%x) error code 0x%lx\n",
-			 adpreset.reset_type, rval);
+		save_snapdump = 0;
 		break;
 	case MPI3MR_IOCTL_ADPRESET_DIAG_FAULT:
-		rval = mpi3mr_diagfault_reset_handler(mrioc,
-				MPI3MR_RESET_FROM_IOCTL);
-		dbgprint(mrioc, "reset_type (0x%x) error code 0x%lx\n",
-			 adpreset.reset_type, rval);
+		save_snapdump = 1;
 		break;
 	default:
-		dbgprint(mrioc, "Unknown reset_type(0x%x) issued\n",
-			 adpreset.reset_type);
+		dbgprint(mrioc, "%s: unknown reset_type(%d)\n",
+		    __func__, adpreset.reset_type);
+		return -EINVAL;
 	}
+
+	rval = mpi3mr_soft_reset_handler(mrioc, MPI3MR_RESET_FROM_IOCTL,
+	    save_snapdump);
+
+	if (rval)
+		dbgprint(mrioc,
+		    "%s: reset handler returned error(%ld) for reset type %d\n",
+		    __func__, rval, adpreset.reset_type);
 
 	return rval;
 }
