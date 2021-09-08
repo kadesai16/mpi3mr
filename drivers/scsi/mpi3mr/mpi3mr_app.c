@@ -11,8 +11,6 @@
 #include "mpi3mr_app.h"
 
 static struct fasync_struct *mpi3mr_app_async_queue;
-static DECLARE_WAIT_QUEUE_HEAD(_app_poll_wait);
-
 
 /**
  * mpi3mr_verify_adapter - verify adapter number is valid
@@ -1342,18 +1340,6 @@ void mpi3mr_app_save_logdata(struct mpi3mr_ioc *mrioc, char *event_data,
 }
 
 /**
- * mpi3mr_app_poll - Obsolete willbe removed
- *
- * Return:POLLIN | POLLRDNORM
- */
-static unsigned int mpi3mr_app_poll(struct file *filep, poll_table *wait)
-{
-	poll_wait(filep, &_app_poll_wait, wait);
-	pr_info("Returning POLLIN | POLLRDNORM from poll()\n");
-	return POLLIN | POLLRDNORM;
-}
-
-/**
  * mpi3mr_app_fasync - fasync callback
  * @fd: File descriptor
  * @filep: File pointer
@@ -1369,7 +1355,6 @@ static int mpi3mr_app_fasync(int fd, struct file *filep, int mode)
 static const struct file_operations mpi3mr_app_fops = {
 	.owner = THIS_MODULE,
 	.unlocked_ioctl = mpi3mr_ioctl,
-	.poll = mpi3mr_app_poll,
 	.fasync = mpi3mr_app_fasync,
 };
 
@@ -1390,8 +1375,6 @@ void mpi3mr_app_init(void)
 	if (misc_register(&mpi3mr_app_dev) < 0)
 		pr_err("%s can't register misc device [minor=%d]\n",
 		       MPI3MR_DRIVER_NAME, MPI3MR_MINOR);
-
-	init_waitqueue_head(&_app_poll_wait);
 }
 
 /**
