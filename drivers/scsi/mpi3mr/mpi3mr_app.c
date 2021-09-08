@@ -157,8 +157,8 @@ static long mpi3mr_enable_logdata(struct mpi3mr_ioc *mrioc,
 
 	if (copy_to_user(data_in_buf, &logdata_enable, sizeof(logdata_enable)))
 		return -EFAULT;
-	else
-		return 0;
+	
+	return 0;
 }
 
 /**
@@ -188,8 +188,8 @@ static long mpi3mr_get_logdata(struct mpi3mr_ioc *mrioc,
 
 	if (copy_to_user(data_in_buf, mrioc->logdata_buf, sz))
 		return -EFAULT;
-	else
-		return 0;
+	
+	return 0;
 }
 
 /**
@@ -363,8 +363,8 @@ static long mpi3mr_get_change_count(struct mpi3mr_ioc *mrioc,
 	chgcnt.change_count = mrioc->change_count;
 	if (copy_to_user(data_in_buf, &chgcnt, sizeof(chgcnt)))
 		return -EFAULT;
-	else
-		return 0;
+	
+	return 0;
 }
 
 /**
@@ -445,8 +445,8 @@ static long mpi3mr_populate_adpinfo(struct mpi3mr_ioc *mrioc,
 
 	if (copy_to_user(data_in_buf, &adpinfo, sizeof(adpinfo)))
 		return -EFAULT;
-	else
-		return 0;
+	
+	return 0;
 }
 
 /**
