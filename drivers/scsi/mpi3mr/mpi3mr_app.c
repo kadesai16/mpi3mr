@@ -1310,6 +1310,38 @@ void mpi3mr_app_send_aen(struct mpi3mr_ioc *mrioc)
 }
 
 /**
+ * mpi3mr_app_save_logdata - Save Log Data events
+ * @mrioc: Adapter instance reference
+ * @event_data: event data associated with log data event
+ * @event_data_size: event data size to copy
+ *
+ * If log data event caching is enabled by the applicatiobns,
+ * then this function saves the log data in the circular queue
+ * and Sends async signal SIGIO to indicate there is an async
+ * event from the firmware to the event monitoring applications.
+ *
+ * Return:Nothing
+ */
+void mpi3mr_app_save_logdata(struct mpi3mr_ioc *mrioc, char *event_data,
+    u16 event_data_size)
+{
+	u32 index = mrioc->logdata_buf_idx, sz;
+	struct mpi3mr_logdata_entry *entry;
+
+	if (!(mrioc->logdata_buf))
+		return;
+
+	entry = (struct mpi3mr_logdata_entry *)
+		(mrioc->logdata_buf + (index * mrioc->logdata_entry_sz));
+	entry->valid_entry = 1;
+	sz = min(mrioc->logdata_entry_sz, event_data_size);
+	memcpy(entry->data, event_data, sz);
+	mrioc->logdata_buf_idx =
+		((++index) % MPI3MR_IOCTL_LOGDATA_MAX_ENTRIES);
+	mpi3mr_app_send_aen(mrioc);
+}
+
+/**
  * mpi3mr_app_poll - Obsolete willbe removed
  *
  * Return:POLLIN | POLLRDNORM

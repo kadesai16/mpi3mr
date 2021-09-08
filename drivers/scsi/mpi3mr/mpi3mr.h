@@ -869,6 +869,7 @@ struct mpi3mr_ioc {
  * @send_ack: Event acknowledgment required or not
  * @process_evt: Bottomhalf processing required or not
  * @evt_ctx: Event context to send in Ack
+ * @evt_data_size: size of the event data in bytes
  * @ref_count: kref count
  * @event_data: Actual MPI3 event data
  */
@@ -880,6 +881,7 @@ struct mpi3mr_fwevt {
 	bool send_ack;
 	bool process_evt;
 	u32 evt_ctx;
+	u16 evt_data_size;
 	struct kref ref_count;
 	char event_data[0] __aligned(4);
 };
@@ -959,5 +961,7 @@ void mpi3mr_flush_delayed_rmhs_list(struct mpi3mr_ioc *mrioc);
 void mpi3mr_app_init(void);
 void mpi3mr_app_exit(void);
 void mpi3mr_app_send_aen(struct mpi3mr_ioc *mrioc);
+void mpi3mr_app_save_logdata(struct mpi3mr_ioc *mrioc, char *event_data,
+    u16 event_data_size);
 
 #endif /*MPI3MR_H_INCLUDED*/
