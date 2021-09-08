@@ -931,7 +931,7 @@ static long mpi3mr_ioctl_process_mpt_cmds(struct file *file,
 	struct mpi3_status_reply_descriptor *status_desc;
 	struct mpi3mr_ioctl_reply_buf *ioctl_reply_buf = NULL;
 	u8 *mpi_req = NULL, *sense_buff_k = NULL;
-	u8 count, bufcnt, din_cnt = 0, dout_cnt = 0, nvme_fmt;
+	u8 count, bufcnt, din_cnt = 0, dout_cnt = 0, nvme_fmt, resp_code;
 	u8 erb_offset = 0xFF, reply_offset = 0xFF, sg_entries = 0;
 	bool invalid_be = false, is_rmcb = false, is_rmrb = false;
 	u32 tmplen;
@@ -1165,10 +1165,25 @@ static long mpi3mr_ioctl_process_mpt_cmds(struct file *file,
 				    (karg.timeout * HZ));
 	if (!(mrioc->ioctl_cmds.state & MPI3MR_CMD_COMPLETE)) {
 		mrioc->ioctl_cmds.is_waiting = 0;
-		dbgprint(mrioc, "%s command timed out\n", __func__);
+		if (mrioc->ioctl_cmds.state & MPI3MR_CMD_RESET) {
+			rval = -EAGAIN;
+			goto out_unlock;
+		}
 		rval = -EFAULT;
-		mpi3mr_soft_reset_handler(mrioc,
-				MPI3MR_RESET_FROM_IOCTL_TIMEOUT, 1);
+		dbgprint(mrioc,
+		    "%s: ioctl request timedout after %d seconds\n",
+		    __func__, karg.timeout);
+		if ((mpi_header->function == MPI3_FUNCTION_NVME_ENCAPSULATED) ||
+		    (mpi_header->function == MPI3_FUNCTION_SCSI_IO))
+			mpi3mr_issue_tm(mrioc,
+			    MPI3_SCSITASKMGMT_TASKTYPE_TARGET_RESET,
+			    mpi_header->function_dependent, 0,
+			    MPI3MR_HOSTTAG_BLK_TMS, MPI3MR_RESETTM_TIMEOUT,
+			    &mrioc->host_tm_cmds, &resp_code, NULL);
+		if (!(mrioc->ioctl_cmds.state & MPI3MR_CMD_COMPLETE) &&
+		    !(mrioc->ioctl_cmds.state & MPI3MR_CMD_RESET))
+			mpi3mr_soft_reset_handler(mrioc,
+			    MPI3MR_RESET_FROM_IOCTL_TIMEOUT, 1);
 		goto out_unlock;
 	}
 

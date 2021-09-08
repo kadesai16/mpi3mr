@@ -2606,7 +2606,7 @@ static void mpi3mr_print_response_code(struct mpi3mr_ioc *mrioc, u8 resp_code)
  *
  * Return: 0 on success, non-zero on errors
  */
-static int mpi3mr_issue_tm(struct mpi3mr_ioc *mrioc, u8 tm_type,
+int mpi3mr_issue_tm(struct mpi3mr_ioc *mrioc, u8 tm_type,
 	u16 handle, uint lun, u16 htag, ulong timeout,
 	struct mpi3mr_drv_cmd *drv_cmd,
 	u8 *resp_code, struct scmd_priv *cmd_priv)
