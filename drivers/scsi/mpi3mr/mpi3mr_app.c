@@ -1272,7 +1272,7 @@ out:
 static long mpi3mr_ioctl(struct file *file, unsigned int cmd,
 			     unsigned long arg)
 {
-	long rval = 0;
+	long rval = -EINVAL;
 
 	switch (cmd) {
 	case MPI3MRDRVCMD:
@@ -1286,7 +1286,6 @@ static long mpi3mr_ioctl(struct file *file, unsigned int cmd,
 					(void __user *)arg);
 		break;
 	default:
-		rval = -EINVAL;
 		pr_err("%s:Unsupported ioctl cmd (0x%08x)\n", __func__, cmd);
 		break;
 	}
