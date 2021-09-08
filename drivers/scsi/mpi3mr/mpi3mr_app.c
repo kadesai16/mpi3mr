@@ -528,7 +528,7 @@ mpi3mr_ioctl_process_drv_cmds(struct file *file, void __user *arg)
  * @bufcnt: Number of DMA buffers
  * @is_rmc: Does the buffer list has management command buffer
  * @is_rmr: Does the buffer list has management response buffer
- * @num_datasges: Number of data buffers in the list
+ * @num_data_sges: Number of data buffers in the list
  *
  * This function places the DMA address of the given buffers in
  * proper format as SGEs in the given MPI request.
@@ -537,7 +537,7 @@ mpi3mr_ioctl_process_drv_cmds(struct file *file, void __user *arg)
  */
 static void mpi3mr_ioctl_build_sgl(u8 *mpi_req, uint32_t sgl_offset,
 		struct mpi3mr_buf_map *dma_buffers,
-		u8 bufcnt, bool is_rmc, bool is_rmr, u8 num_datasges)
+		u8 bufcnt, bool is_rmc, bool is_rmr, u8 num_data_sges)
 {
 	u8 *sgl;
 	u8 sgl_flags, sgl_flags_last, count = 0;
@@ -571,14 +571,14 @@ static void mpi3mr_ioctl_build_sgl(u8 *mpi_req, uint32_t sgl_offset,
 		} else
 			mpi3mr_build_zero_len_sge(&mgmt_pt_req->response_sgl);
 	}
-	if (!num_datasges) {
+	if (!num_data_sges) {
 		mpi3mr_build_zero_len_sge(sgl);
 		return;
 	}
 	for (; count < bufcnt; count++, dma_buff++) {
 		if (dma_buff->data_dir == DMA_BIDIRECTIONAL)
 			continue;
-		if (num_datasges == 1 || !is_rmc)
+		if (num_data_sges == 1 || !is_rmc)
 			mpi3mr_add_sg_single(sgl, sgl_flags_last,
 					     dma_buff->kern_buf_len,
 					     dma_buff->kern_buf_dma);
@@ -587,7 +587,7 @@ static void mpi3mr_ioctl_build_sgl(u8 *mpi_req, uint32_t sgl_offset,
 					     dma_buff->kern_buf_len,
 					     dma_buff->kern_buf_dma);
 		sgl += sizeof(struct mpi3_sge_common);
-		num_datasges--;
+		num_data_sges--;
 	}
 }
 
@@ -931,7 +931,7 @@ static long mpi3mr_ioctl_process_mpt_cmds(struct file *file,
 	struct mpi3_status_reply_descriptor *status_desc;
 	struct mpi3mr_ioctl_reply_buf *ioctl_reply_buf = NULL;
 	u8 *mpi_req = NULL, *sense_buff_k = NULL;
-	u8 count, bufcnt, din_cnt = 0, dout_cnt = 0, nvme_fmt;
+	u8 count, bufcnt, din_cnt = 0, dout_cnt = 0, nvme_fmt, resp_code;
 	u8 erb_offset = 0xFF, reply_offset = 0xFF, sg_entries = 0;
 	bool invalid_be = false, is_rmcb = false, is_rmrb = false;
 	u32 tmplen;
@@ -1165,17 +1165,38 @@ static long mpi3mr_ioctl_process_mpt_cmds(struct file *file,
 				    (karg.timeout * HZ));
 	if (!(mrioc->ioctl_cmds.state & MPI3MR_CMD_COMPLETE)) {
 		mrioc->ioctl_cmds.is_waiting = 0;
-		dbgprint(mrioc, "%s command timed out\n", __func__);
+		if (mrioc->ioctl_cmds.state & MPI3MR_CMD_RESET) {
+			rval = -EAGAIN;
+			goto out_unlock;
+		}
 		rval = -EFAULT;
-		mpi3mr_soft_reset_handler(mrioc,
-				MPI3MR_RESET_FROM_IOCTL_TIMEOUT, 1);
+		dbgprint(mrioc,
+		    "%s: ioctl request timedout after %d seconds\n",
+		    __func__, karg.timeout);
+		if ((mpi_header->function == MPI3_FUNCTION_NVME_ENCAPSULATED) ||
+		    (mpi_header->function == MPI3_FUNCTION_SCSI_IO))
+			mpi3mr_issue_tm(mrioc,
+			    MPI3_SCSITASKMGMT_TASKTYPE_TARGET_RESET,
+			    mpi_header->function_dependent, 0,
+			    MPI3MR_HOSTTAG_BLK_TMS, MPI3MR_RESETTM_TIMEOUT,
+			    &mrioc->host_tm_cmds, &resp_code, NULL);
+		if (!(mrioc->ioctl_cmds.state & MPI3MR_CMD_COMPLETE) &&
+		    !(mrioc->ioctl_cmds.state & MPI3MR_CMD_RESET))
+			mpi3mr_soft_reset_handler(mrioc,
+			    MPI3MR_RESET_FROM_IOCTL_TIMEOUT, 1);
 		goto out_unlock;
+	}
+
+	if (mrioc->nvme_encap_prp_list) {
+		dma_free_coherent(&mrioc->pdev->dev, mrioc->nvme_encap_prp_sz,
+		    mrioc->nvme_encap_prp_list, mrioc->nvme_encap_prp_list_dma);
+		mrioc->nvme_encap_prp_list = NULL;
 	}
 
 	if ((mrioc->ioctl_cmds.ioc_status & MPI3_IOCSTATUS_STATUS_MASK)
 	     != MPI3_IOCSTATUS_SUCCESS) {
 		dbgprint(mrioc,
-			"%s ioc_status(0x%04x)  Loginfo(0x%08x)\n", __func__,
+			"%s ioc_status(0x%04x)  loginfo(0x%08x)\n", __func__,
 			(mrioc->ioctl_cmds.ioc_status & MPI3_IOCSTATUS_STATUS_MASK),
 			mrioc->ioctl_cmds.ioc_loginfo);
 	}

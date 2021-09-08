@@ -940,6 +940,10 @@ void mpi3mr_stop_watchdog(struct mpi3mr_ioc *mrioc);
 
 int mpi3mr_soft_reset_handler(struct mpi3mr_ioc *mrioc,
 			      u32 reset_reason, u8 snapdump);
+int mpi3mr_issue_tm(struct mpi3mr_ioc *mrioc, u8 tm_type,
+		    u16 handle, uint lun, u16 htag, ulong timeout,
+		    struct mpi3mr_drv_cmd *drv_cmd,
+		    u8 *resp_code, struct scmd_priv *cmd_priv);
 int mpi3mr_diagfault_reset_handler(struct mpi3mr_ioc *mrioc,
 				   u32 reset_reason);
 void mpi3mr_ioc_disable_intr(struct mpi3mr_ioc *mrioc);
