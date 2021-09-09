@@ -25,10 +25,10 @@ int prot_mask = -1;
 module_param(prot_mask, int, 0);
 MODULE_PARM_DESC(prot_mask, "Host protection capabilities mask, def=0x07");
 
-int prot_guard_mask = 3;
+static int prot_guard_mask = 3;
 module_param(prot_guard_mask, int, 0);
 MODULE_PARM_DESC(prot_guard_mask, " Host protection guard mask, def=3");
-int logging_level;
+static int logging_level;
 module_param(logging_level, int, 0);
 MODULE_PARM_DESC(logging_level,
 	" bits for enabling additional logging info (default=0)");
@@ -50,7 +50,7 @@ static u16 mpi3mr_host_tag_for_scmd(struct mpi3mr_ioc *mrioc,
 	u32 unique_tag;
 	u16 host_tag, hw_queue;
 
-	unique_tag = blk_mq_unique_tag(scmd->request);
+	unique_tag = blk_mq_unique_tag(scsi_cmd_to_rq(scmd));
 
 	hw_queue = blk_mq_unique_tag_to_hwq(unique_tag);
 	if (hw_queue >= mrioc->num_op_reply_q)
@@ -867,8 +867,9 @@ static void mpi3mr_update_tgtdev(struct mpi3mr_ioc *mrioc,
 		if ((dev_info & MPI3_DEVICE0_PCIE_DEVICE_INFO_TYPE_MASK) !=
 		    MPI3_DEVICE0_PCIE_DEVICE_INFO_TYPE_NVME_DEVICE)
 			tgtdev->is_hidden = 1;
-		if (mrioc->shost)
-			prot_mask = scsi_host_get_prot(mrioc->shost);
+		if (!mrioc->shost)
+			break;
+		prot_mask = scsi_host_get_prot(mrioc->shost);
 		if (prot_mask & SHOST_DIX_TYPE0_PROTECTION) {
 			scsi_host_set_prot(mrioc->shost, prot_mask & 0x77);
 			ioc_info(mrioc,
@@ -1732,6 +1733,7 @@ static void mpi3mr_sastopochg_evt_th(struct mpi3mr_ioc *mrioc,
 				atomic_dec_if_positive
 				    (&scsi_tgt_priv_data->block_io);
 			}
+			break;
 		case MPI3_EVENT_SAS_TOPO_PHY_RC_PHY_CHANGED:
 		default:
 			break;
@@ -1961,7 +1963,6 @@ static void mpi3mr_setup_eedp(struct mpi3mr_ioc *mrioc,
 {
 	u16 eedp_flags = 0;
 	unsigned char prot_op = scsi_get_prot_op(scmd);
-	unsigned char prot_type = scsi_get_prot_type(scmd);
 
 	switch (prot_op) {
 	case SCSI_PROT_NORMAL:
@@ -1981,60 +1982,42 @@ static void mpi3mr_setup_eedp(struct mpi3mr_ioc *mrioc,
 		scsiio_req->msg_flags |= MPI3_SCSIIO_MSGFLAGS_METASGL_VALID;
 		break;
 	case SCSI_PROT_READ_PASS:
-		eedp_flags = MPI3_EEDPFLAGS_EEDP_OP_CHECK |
-		    MPI3_EEDPFLAGS_CHK_REF_TAG | MPI3_EEDPFLAGS_CHK_APP_TAG |
-		    MPI3_EEDPFLAGS_CHK_GUARD;
+		eedp_flags = MPI3_EEDPFLAGS_EEDP_OP_CHECK;
 		scsiio_req->msg_flags |= MPI3_SCSIIO_MSGFLAGS_METASGL_VALID;
 		break;
 	case SCSI_PROT_WRITE_PASS:
-		if (scsi_host_get_guard(scmd->device->host)
-		    & SHOST_DIX_GUARD_IP) {
-			eedp_flags = MPI3_EEDPFLAGS_EEDP_OP_CHECK_REGEN |
-			    MPI3_EEDPFLAGS_CHK_APP_TAG |
-			    MPI3_EEDPFLAGS_CHK_GUARD |
-			    MPI3_EEDPFLAGS_INCR_PRI_REF_TAG;
+		if (scmd->prot_flags & SCSI_PROT_IP_CHECKSUM) {
+			eedp_flags = MPI3_EEDPFLAGS_EEDP_OP_CHECK_REGEN;
 			scsiio_req->sgl[0].eedp.application_tag_translation_mask =
 			    0xffff;
-		} else {
-			eedp_flags = MPI3_EEDPFLAGS_EEDP_OP_CHECK |
-			    MPI3_EEDPFLAGS_CHK_REF_TAG |
-			    MPI3_EEDPFLAGS_CHK_APP_TAG |
-			    MPI3_EEDPFLAGS_CHK_GUARD;
-		}
+		} else
+			eedp_flags = MPI3_EEDPFLAGS_EEDP_OP_CHECK;
+
 		scsiio_req->msg_flags |= MPI3_SCSIIO_MSGFLAGS_METASGL_VALID;
 		break;
 	default:
 		return;
 	}
 
-	if (scsi_host_get_guard(scmd->device->host) & SHOST_DIX_GUARD_IP)
+	if (scmd->prot_flags & SCSI_PROT_GUARD_CHECK)
+		eedp_flags |= MPI3_EEDPFLAGS_CHK_GUARD;
+
+	if (scmd->prot_flags & SCSI_PROT_IP_CHECKSUM)
 		eedp_flags |= MPI3_EEDPFLAGS_HOST_GUARD_IP_CHKSUM;
 
-	switch (prot_type) {
-	case SCSI_PROT_DIF_TYPE0:
-		eedp_flags |= MPI3_EEDPFLAGS_INCR_PRI_REF_TAG;
+	if (scmd->prot_flags & SCSI_PROT_REF_CHECK) {
+		eedp_flags |= MPI3_EEDPFLAGS_CHK_REF_TAG |
+			MPI3_EEDPFLAGS_INCR_PRI_REF_TAG;
 		scsiio_req->cdb.eedp32.primary_reference_tag =
-		    cpu_to_be32(t10_pi_ref_tag(scmd->request));
-		break;
-	case SCSI_PROT_DIF_TYPE1:
-	case SCSI_PROT_DIF_TYPE2:
-		eedp_flags |= MPI3_EEDPFLAGS_INCR_PRI_REF_TAG |
-		    MPI3_EEDPFLAGS_ESC_MODE_APPTAG_DISABLE |
-		    MPI3_EEDPFLAGS_CHK_GUARD;
-		scsiio_req->cdb.eedp32.primary_reference_tag =
-		    cpu_to_be32(t10_pi_ref_tag(scmd->request));
-		break;
-	case SCSI_PROT_DIF_TYPE3:
-		eedp_flags |= MPI3_EEDPFLAGS_CHK_GUARD |
-		    MPI3_EEDPFLAGS_ESC_MODE_APPTAG_DISABLE;
-		break;
-
-	default:
-		scsiio_req->msg_flags &= ~(MPI3_SCSIIO_MSGFLAGS_METASGL_VALID);
-		return;
+			cpu_to_be32(scsi_prot_ref_tag(scmd));
 	}
 
-	switch (scmd->device->sector_size) {
+	if (scmd->prot_flags & SCSI_PROT_REF_INCREMENT)
+		eedp_flags |= MPI3_EEDPFLAGS_INCR_PRI_REF_TAG;
+
+	eedp_flags |= MPI3_EEDPFLAGS_ESC_MODE_APPTAG_DISABLE;
+
+	switch (scsi_prot_interval(scmd)) {
 	case 512:
 		scsiio_req->sgl[0].eedp.user_data_size = MPI3_EEDP_UDS_512;
 		break;
@@ -2127,8 +2110,7 @@ static void mpi3mr_map_eedp_error(struct scsi_cmnd *scmd,
 
 	mpi3mr_build_sense_buffer(0, scmd->sense_buffer, ILLEGAL_REQUEST,
 	    0x10, ascq);
-	scmd->result = DRIVER_SENSE << 24 | (DID_ABORT << 16) |
-	    SAM_STAT_CHECK_CONDITION;
+	scmd->result = (DID_ABORT << 16) | SAM_STAT_CHECK_CONDITION;
 }
 
 /**
@@ -3295,13 +3277,10 @@ static int mpi3mr_target_alloc(struct scsi_target *starget)
 		return -ENOMEM;
 
 	starget->hostdata = scsi_tgt_priv_data;
-	scsi_tgt_priv_data->starget = starget;
-	scsi_tgt_priv_data->dev_handle = MPI3MR_INVALID_DEV_HANDLE;
 
 	spin_lock_irqsave(&mrioc->tgtdev_lock, flags);
 	tgt_dev = __mpi3mr_get_tgtdev_by_perst_id(mrioc, starget->id);
 	if (tgt_dev && !tgt_dev->is_hidden) {
-		starget->hostdata = scsi_tgt_priv_data;
 		scsi_tgt_priv_data->starget = starget;
 		scsi_tgt_priv_data->dev_handle = tgt_dev->dev_handle;
 		scsi_tgt_priv_data->perst_id = tgt_dev->perst_id;
@@ -3310,10 +3289,8 @@ static int mpi3mr_target_alloc(struct scsi_target *starget)
 		tgt_dev->starget = starget;
 		atomic_set(&scsi_tgt_priv_data->block_io, 0);
 		retval = 0;
-	} else {
-		kfree(scsi_tgt_priv_data);
+	} else
 		retval = -ENXIO;
-	}
 	spin_unlock_irqrestore(&mrioc->tgtdev_lock, flags);
 
 	return retval;
@@ -3354,8 +3331,7 @@ static bool mpi3mr_check_return_unmap(struct mpi3mr_ioc *mrioc,
 		    "%s: cdb received with invalid param_len: %d\n",
 		    __func__, param_len);
 		scsi_print_command(scmd);
-		scmd->result = (DRIVER_SENSE << 24) |
-		    SAM_STAT_CHECK_CONDITION;
+		scmd->result = SAM_STAT_CHECK_CONDITION;
 		scsi_build_sense_buffer(0, scmd->sense_buffer, ILLEGAL_REQUEST,
 		    0x1A, 0);
 		scmd->scsi_done(scmd);
@@ -3366,8 +3342,7 @@ static bool mpi3mr_check_return_unmap(struct mpi3mr_ioc *mrioc,
 		    "%s: cdb received with param_len: %d bufflen: %d\n",
 		    __func__, param_len, scsi_bufflen(scmd));
 		scsi_print_command(scmd);
-		scmd->result = (DRIVER_SENSE << 24) |
-		    SAM_STAT_CHECK_CONDITION;
+		scmd->result = SAM_STAT_CHECK_CONDITION;
 		scsi_build_sense_buffer(0, scmd->sense_buffer, ILLEGAL_REQUEST,
 		    0x1A, 0);
 		scmd->scsi_done(scmd);
@@ -3376,8 +3351,7 @@ static bool mpi3mr_check_return_unmap(struct mpi3mr_ioc *mrioc,
 	buf = kzalloc(scsi_bufflen(scmd), GFP_ATOMIC);
 	if (!buf) {
 		scsi_print_command(scmd);
-		scmd->result = (DRIVER_SENSE << 24) |
-		    SAM_STAT_CHECK_CONDITION;
+		scmd->result = SAM_STAT_CHECK_CONDITION;
 		scsi_build_sense_buffer(0, scmd->sense_buffer, ILLEGAL_REQUEST,
 		    0x55, 0x03);
 		scmd->scsi_done(scmd);
@@ -3391,8 +3365,7 @@ static bool mpi3mr_check_return_unmap(struct mpi3mr_ioc *mrioc,
 		    "%s: Invalid descriptor length in param list: %d\n",
 		    __func__, desc_len);
 		scsi_print_command(scmd);
-		scmd->result = (DRIVER_SENSE << 24) |
-		    SAM_STAT_CHECK_CONDITION;
+		scmd->result = SAM_STAT_CHECK_CONDITION;
 		scsi_build_sense_buffer(0, scmd->sense_buffer, ILLEGAL_REQUEST,
 		    0x26, 0);
 		scmd->scsi_done(scmd);
@@ -3459,7 +3432,7 @@ static int mpi3mr_qcmd(struct Scsi_Host *shost,
 	u16 dev_handle;
 	u16 host_tag;
 	u32 scsiio_flags = 0;
-	struct request *rq = scmd->request;
+	struct request *rq = scsi_cmd_to_rq(scmd);
 	int iprio_class;
 
 	sdev_priv_data = scmd->device->hostdata;
@@ -3803,7 +3776,7 @@ mpi3mr_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	}
 
 	mrioc->is_driver_loading = 1;
-	if (mpi3mr_init_ioc(mrioc, 0)) {
+	if (mpi3mr_init_ioc(mrioc, MPI3MR_IT_INIT)) {
 		ioc_err(mrioc, "failure at %s:%d/%s()!\n",
 		    __FILE__, __LINE__, __func__);
 		retval = -ENODEV;
@@ -3826,7 +3799,7 @@ mpi3mr_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	return retval;
 
 addhost_failed:
-	mpi3mr_cleanup_ioc(mrioc, 0);
+	mpi3mr_cleanup_ioc(mrioc, MPI3MR_COMPLETE_CLEANUP);
 out_iocinit_failed:
 	destroy_workqueue(mrioc->fwevt_worker_thread);
 out_fwevtthread_failed:
@@ -3878,7 +3851,7 @@ static void mpi3mr_remove(struct pci_dev *pdev)
 		mpi3mr_tgtdev_del_from_list(mrioc, tgtdev);
 		mpi3mr_tgtdev_put(tgtdev);
 	}
-	mpi3mr_cleanup_ioc(mrioc, 0);
+	mpi3mr_cleanup_ioc(mrioc, MPI3MR_COMPLETE_CLEANUP);
 
 	spin_lock(&mrioc_list_lock);
 	list_del(&mrioc->list);
@@ -3918,7 +3891,7 @@ static void mpi3mr_shutdown(struct pci_dev *pdev)
 	spin_unlock_irqrestore(&mrioc->fwevt_lock, flags);
 	if (wq)
 		destroy_workqueue(wq);
-	mpi3mr_cleanup_ioc(mrioc, 0);
+	mpi3mr_cleanup_ioc(mrioc, MPI3MR_COMPLETE_CLEANUP);
 }
 
 #ifdef CONFIG_PM
@@ -3948,7 +3921,7 @@ static int mpi3mr_suspend(struct pci_dev *pdev, pm_message_t state)
 	mpi3mr_cleanup_fwevt_list(mrioc);
 	scsi_block_requests(shost);
 	mpi3mr_stop_watchdog(mrioc);
-	mpi3mr_cleanup_ioc(mrioc, 1);
+	mpi3mr_cleanup_ioc(mrioc, MPI3MR_SUSPEND);
 
 	device_state = pci_choose_state(pdev, state);
 	ioc_info(mrioc, "pdev=0x%p, slot=%s, entering operating state [D%d]\n",
@@ -3996,7 +3969,8 @@ static int mpi3mr_resume(struct pci_dev *pdev)
 	}
 
 	mrioc->stop_drv_processing = 0;
-	mpi3mr_init_ioc(mrioc, 1);
+	mpi3mr_memset_buffers(mrioc);
+	mpi3mr_init_ioc(mrioc, MPI3MR_IT_RESUME);
 	scsi_unblock_requests(shost);
 	mpi3mr_start_watchdog(mrioc);
 
