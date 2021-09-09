@@ -1220,7 +1220,9 @@ int mpi3mr_admin_request_post(struct mpi3mr_ioc *mrioc, void *admin_req,
 	u8 *areq_entry;
 
 	if (mrioc->unrecoverable) {
-		ioc_err(mrioc, "%s : Unrecoverable controller\n", __func__);
+		ioc_err(mrioc, "%ps %s error: Unrecoverable controller\n",
+				 __builtin_return_address(0),
+				 __func__);
 		return -EFAULT;
 	}
 
@@ -1230,12 +1232,16 @@ int mpi3mr_admin_request_post(struct mpi3mr_ioc *mrioc, void *admin_req,
 	max_entries = mrioc->num_admin_req;
 	if ((areq_ci == (areq_pi + 1)) || ((!areq_ci) &&
 	    (areq_pi == (max_entries - 1)))) {
-		ioc_err(mrioc, "AdminReqQ full condition detected\n");
+		ioc_err(mrioc, "%ps %s error: AdminReqQ full\n",
+				 __builtin_return_address(0),
+				 __func__);
 		retval = -EAGAIN;
 		goto out;
 	}
 	if (!ignore_reset && mrioc->reset_in_progress) {
-		ioc_err(mrioc, "AdminReqQ submit reset in progress\n");
+		ioc_err(mrioc, "%ps %s error: AdminReqQ reset in progress\n",
+				 __builtin_return_address(0),
+				 __func__);
 		retval = -EAGAIN;
 		goto out;
 	}
@@ -2384,7 +2390,7 @@ static void mpi3mr_process_factsdata(struct mpi3mr_ioc *mrioc,
 	mrioc->facts.max_vds = le16_to_cpu(facts_data->max_vds);
 	mrioc->facts.max_hpds = le16_to_cpu(facts_data->max_host_pds);
 	mrioc->facts.max_advhpds = le16_to_cpu(facts_data->max_adv_host_pds);
-	mrioc->facts.max_raidpds = le16_to_cpu(facts_data->max_raid_pds);
+	mrioc->facts.max_raid_pds = le16_to_cpu(facts_data->max_raid_pds);
 	mrioc->facts.max_nvme = le16_to_cpu(facts_data->max_nvme);
 	mrioc->facts.max_pcie_switches =
 	    le16_to_cpu(facts_data->max_pcie_switches);
@@ -2421,10 +2427,9 @@ static void mpi3mr_process_factsdata(struct mpi3mr_ioc *mrioc,
 	    mrioc->facts.ioc_num, mrioc->facts.max_op_req_q,
 	    mrioc->facts.max_op_reply_q, mrioc->facts.max_devhandle);
 	ioc_info(mrioc,
-	    "maxreqs(%d), mindh(%d) maxPDs(%d) maxvectors(%d) maxperids(%d)\n",
+	    "maxreqs(%d), mindh(%d) maxvectors(%d) maxperids(%d)\n",
 	    mrioc->facts.max_reqs, mrioc->facts.min_devhandle,
-	    mrioc->facts.max_pds, mrioc->facts.max_msix_vectors,
-	    mrioc->facts.max_perids);
+	    mrioc->facts.max_msix_vectors, mrioc->facts.max_perids);
 	ioc_info(mrioc, "SGEModMask 0x%x SGEModVal 0x%x SGEModShift 0x%x ",
 	    mrioc->facts.sge_mod_mask, mrioc->facts.sge_mod_value,
 	    mrioc->facts.sge_mod_shift);
@@ -2527,7 +2532,7 @@ static int mpi3mr_alloc_reply_sense_bufs(struct mpi3mr_ioc *mrioc)
 		goto out_failed;
 
 	/* sense buffer pool,  4 byte align */
-	sz = mrioc->num_sense_bufs * MPI3MR_SENSEBUF_SZ;
+	sz = mrioc->num_sense_bufs * MPI3MR_SENSE_BUF_SZ;
 	mrioc->sense_buf_pool = dma_pool_create("sense_buf pool",
 	    &mrioc->pdev->dev, sz, 4, 0);
 	if (!mrioc->sense_buf_pool) {
@@ -2563,10 +2568,10 @@ post_reply_sbuf:
 	    "reply_free_q pool(0x%p): depth(%d), frame_size(%d), pool_size(%d kB), reply_dma(0x%llx)\n",
 	    mrioc->reply_free_q, mrioc->reply_free_qsz, 8, (sz / 1024),
 	    (unsigned long long)mrioc->reply_free_q_dma);
-	sz = mrioc->num_sense_bufs * MPI3MR_SENSEBUF_SZ;
+	sz = mrioc->num_sense_bufs * MPI3MR_SENSE_BUF_SZ;
 	ioc_info(mrioc,
 	    "sense_buf pool(0x%p): depth(%d), frame_size(%d), pool_size(%d kB), sense_dma(0x%llx)\n",
-	    mrioc->sense_buf, mrioc->num_sense_bufs, MPI3MR_SENSEBUF_SZ,
+	    mrioc->sense_buf, mrioc->num_sense_bufs, MPI3MR_SENSE_BUF_SZ,
 	    (sz / 1024), (unsigned long long)mrioc->sense_buf_dma);
 	sz = mrioc->sense_buf_q_sz * 8;
 	ioc_info(mrioc,
@@ -2582,7 +2587,7 @@ post_reply_sbuf:
 
 	/* initialize Sense Buffer Queue */
 	for (i = 0, phy_addr = mrioc->sense_buf_dma;
-	    i < mrioc->num_sense_bufs; i++, phy_addr += MPI3MR_SENSEBUF_SZ)
+	    i < mrioc->num_sense_bufs; i++, phy_addr += MPI3MR_SENSE_BUF_SZ)
 		mrioc->sense_buf_q[i] = cpu_to_le64(phy_addr);
 	mrioc->sense_buf_q[i] = cpu_to_le64(0);
 	return retval;
@@ -2649,7 +2654,7 @@ static int mpi3mr_issue_iocinit(struct mpi3mr_ioc *mrioc)
 	iocinit_req.reply_free_queue_depth = cpu_to_le16(mrioc->reply_free_qsz);
 	iocinit_req.reply_free_queue_address =
 	    cpu_to_le64(mrioc->reply_free_q_dma);
-	iocinit_req.sense_buffer_length = cpu_to_le16(MPI3MR_SENSEBUF_SZ);
+	iocinit_req.sense_buffer_length = cpu_to_le16(MPI3MR_SENSE_BUF_SZ);
 	iocinit_req.sense_buffer_free_queue_depth =
 	    cpu_to_le16(mrioc->sense_buf_q_sz);
 	iocinit_req.sense_buffer_free_queue_address =
