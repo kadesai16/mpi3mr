@@ -537,7 +537,7 @@ found_tgtdev:
  *
  * Return: Target device reference.
  */
-static struct mpi3mr_tgt_dev *mpi3mr_get_tgtdev_by_handle(
+struct mpi3mr_tgt_dev *mpi3mr_get_tgtdev_by_handle(
 	struct mpi3mr_ioc *mrioc, u16 handle)
 {
 	struct mpi3mr_tgt_dev *tgtdev;
@@ -585,7 +585,7 @@ found_tgtdev:
  *
  * Return: Target device reference.
  */
-static struct mpi3mr_tgt_dev *mpi3mr_get_tgtdev_by_perst_id(
+struct mpi3mr_tgt_dev *mpi3mr_get_tgtdev_by_perst_id(
 	struct mpi3mr_ioc *mrioc, u16 persist_id)
 {
 	struct mpi3mr_tgt_dev *tgtdev;
@@ -3074,6 +3074,7 @@ static int mpi3mr_scan_finished(struct Scsi_Host *shost,
 	ioc_info(mrioc, "%s :port enable: SUCCESS\n", __func__);
 	mpi3mr_start_watchdog(mrioc);
 	mrioc->is_driver_loading = 0;
+	mrioc->block_ioctls = 0;
 
 	return 1;
 }
@@ -3717,6 +3718,7 @@ mpi3mr_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	mutex_init(&mrioc->reset_mutex);
 	mpi3mr_init_drv_cmd(&mrioc->init_cmds, MPI3MR_HOSTTAG_INITCMDS);
+	mpi3mr_init_drv_cmd(&mrioc->ioctl_cmds, MPI3MR_HOSTTAG_IOCTLCMDS);
 	mpi3mr_init_drv_cmd(&mrioc->host_tm_cmds, MPI3MR_HOSTTAG_BLK_TMS);
 
 	for (i = 0; i < MPI3MR_NUM_DEVRMCMD; i++)
@@ -3730,6 +3732,7 @@ mpi3mr_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	mrioc->logging_level = logging_level;
 	mrioc->shost = shost;
 	mrioc->pdev = pdev;
+	mrioc->block_ioctls = 1;
 
 	/* init shost parameters */
 	shost->max_cmd_len = MPI3MR_MAX_CDB_LENGTH;
@@ -4006,6 +4009,7 @@ static int __init mpi3mr_init(void)
 	pr_info("Loading %s version %s\n", MPI3MR_DRIVER_NAME,
 	    MPI3MR_DRIVER_VERSION);
 
+	mpi3mr_app_init();
 	ret_val = pci_register_driver(&mpi3mr_pci_driver);
 
 	return ret_val;
@@ -4021,6 +4025,7 @@ static void __exit mpi3mr_exit(void)
 		pr_info("Unloading %s version %s\n", MPI3MR_DRIVER_NAME,
 		    MPI3MR_DRIVER_VERSION);
 
+	mpi3mr_app_exit();
 	pci_unregister_driver(&mpi3mr_pci_driver);
 }
 

@@ -287,6 +287,8 @@ mpi3mr_get_drv_cmd(struct mpi3mr_ioc *mrioc, u16 host_tag,
 	switch (host_tag) {
 	case MPI3MR_HOSTTAG_INITCMDS:
 		return &mrioc->init_cmds;
+	case MPI3MR_HOSTTAG_IOCTLCMDS:
+		return &mrioc->ioctl_cmds;
 	case MPI3MR_HOSTTAG_BLK_TMS:
 		return &mrioc->host_tm_cmds;
 	case MPI3MR_HOSTTAG_INVALID:
@@ -370,6 +372,11 @@ static void mpi3mr_process_admin_reply_desc(struct mpi3mr_ioc *mrioc,
 				cmdptr->state |= MPI3MR_CMD_REPLY_VALID;
 				memcpy((u8 *)cmdptr->reply, (u8 *)def_reply,
 				    mrioc->facts.reply_sz);
+			}
+			if (sense_buf && cmdptr->sensebuf) {
+				cmdptr->is_sense = true;
+				memcpy(cmdptr->sensebuf, sense_buf,
+				    MPI3MR_SENSE_BUF_SZ);
 			}
 			if (cmdptr->is_waiting) {
 				complete(&cmdptr->done);
@@ -2454,6 +2461,10 @@ static int mpi3mr_alloc_reply_sense_bufs(struct mpi3mr_ioc *mrioc)
 	if (!mrioc->init_cmds.reply)
 		goto out_failed;
 
+	mrioc->ioctl_cmds.reply = kzalloc(mrioc->facts.reply_sz, GFP_KERNEL);
+	if (!mrioc->ioctl_cmds.reply)
+		goto out_failed;
+
 	for (i = 0; i < MPI3MR_NUM_DEVRMCMD; i++) {
 		mrioc->dev_rmhs_cmds[i].reply = kzalloc(mrioc->facts.reply_sz,
 		    GFP_KERNEL);
@@ -3505,6 +3516,7 @@ void mpi3mr_memset_buffers(struct mpi3mr_ioc *mrioc)
 	memset(mrioc->admin_reply_base, 0, mrioc->admin_reply_q_sz);
 
 	memset(mrioc->init_cmds.reply, 0, sizeof(*mrioc->init_cmds.reply));
+	memset(mrioc->ioctl_cmds.reply, 0, sizeof(*mrioc->ioctl_cmds.reply));
 	memset(mrioc->host_tm_cmds.reply, 0,
 	    sizeof(*mrioc->host_tm_cmds.reply));
 	for (i = 0; i < MPI3MR_NUM_DEVRMCMD; i++)
@@ -3601,6 +3613,9 @@ static void mpi3mr_free_mem(struct mpi3mr_ioc *mrioc)
 	kfree(mrioc->init_cmds.reply);
 	mrioc->init_cmds.reply = NULL;
 
+	kfree(mrioc->ioctl_cmds.reply);
+	mrioc->ioctl_cmds.reply = NULL;
+
 	kfree(mrioc->host_tm_cmds.reply);
 	mrioc->host_tm_cmds.reply = NULL;
 
@@ -3644,6 +3659,9 @@ static void mpi3mr_free_mem(struct mpi3mr_ioc *mrioc)
 		    mrioc->admin_req_base, mrioc->admin_req_dma);
 		mrioc->admin_req_base = NULL;
 	}
+
+	kfree(mrioc->logdata_buf);
+	mrioc->logdata_buf = NULL;
 }
 
 /**
@@ -3788,6 +3806,10 @@ static void mpi3mr_flush_drv_cmds(struct mpi3mr_ioc *mrioc)
 
 	cmdptr = &mrioc->init_cmds;
 	mpi3mr_drv_cmd_comp_reset(mrioc, cmdptr);
+
+	cmdptr = &mrioc->ioctl_cmds;
+	mpi3mr_drv_cmd_comp_reset(mrioc, cmdptr);
+
 	cmdptr = &mrioc->host_tm_cmds;
 	mpi3mr_drv_cmd_comp_reset(mrioc, cmdptr);
 
@@ -3875,6 +3897,7 @@ int mpi3mr_soft_reset_handler(struct mpi3mr_ioc *mrioc,
 		return -1;
 	}
 	mrioc->reset_in_progress = 1;
+	mrioc->block_ioctls = 1;
 
 	if ((!snapdump) && (reset_reason != MPI3MR_RESET_FROM_FAULT_WATCH) &&
 	    (reset_reason != MPI3MR_RESET_FROM_CIACTIV_FAULT)) {
@@ -3945,6 +3968,7 @@ out:
 			    &mrioc->watchdog_work,
 			    msecs_to_jiffies(MPI3MR_WATCHDOG_INTERVAL));
 		spin_unlock_irqrestore(&mrioc->watchdog_lock, flags);
+		mrioc->block_ioctls = 0;
 	} else {
 		mpi3mr_issue_reset(mrioc,
 		    MPI3_SYSIF_HOST_DIAG_RESET_ACTION_DIAG_FAULT, reset_reason);
